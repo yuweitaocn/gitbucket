@@ -6,6 +6,7 @@ import play.twirl.sbt.SbtTwirl
 import play.twirl.sbt.Import.TwirlKeys._
 import sbtassembly._
 import sbtassembly.AssemblyKeys._
+import org.scalajs.sbtplugin.ScalaJSPlugin
 
 object MyBuild extends Build {
   val Organization = "gitbucket"
@@ -64,7 +65,8 @@ object MyBuild extends Build {
       "junit" % "junit" % "4.12" % "test",
       "com.mchange" % "c3p0" % "0.9.5",
       "com.typesafe" % "config" % "1.2.1",
-      "com.typesafe.play" %% "twirl-compiler" % "1.0.4"
+      "com.typesafe.play" %% "twirl-compiler" % "1.0.4",
+      "org.scala-js" %% "scalajs-dom_sjs0.6" % "0.8.0"
     ),
     play.twirl.sbt.Import.TwirlKeys.templateImports += "gitbucket.core._",
     EclipseKeys.withSource := true,
@@ -72,7 +74,14 @@ object MyBuild extends Build {
     testOptions in Test += Tests.Argument(TestFrameworks.Specs2, "junitxml", "console"),
     javaOptions in Test += "-Dgitbucket.home=target/gitbucket_home_for_test",
     testOptions in Test += Tests.Setup( () => new java.io.File("target/gitbucket_home_for_test").mkdir() ),
-    fork in Test := true,
-    packageOptions += Package.MainClass("JettyLauncher")
-  ).enablePlugins(SbtTwirl)
+    //fork in Test := true,
+    packageOptions += Package.MainClass("JettyLauncher"),
+    commands ++= Seq(Command.command("copyJS") { (state) =>
+      scala.sys.process.Process(List("cp", "target/scala-2.11/gitbucket-fastopt.js", "src/main/webapp/assets/common/js/scala.js")).!
+      state
+    }),
+    net.virtualvoid.sbt.graph.Plugin.graphSettings
+  )
+  .enablePlugins(SbtTwirl)
+  .enablePlugins(ScalaJSPlugin)
 }
