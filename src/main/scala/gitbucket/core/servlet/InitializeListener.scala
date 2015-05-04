@@ -77,10 +77,11 @@ class DeleteOldActivityActor extends Actor with SystemSettingsService with Activ
     case s: String => {
       loadSystemSettings().activityLogLimit.foreach { limit =>
         if(limit > 0){
-          Database() withTransaction { implicit session =>
+          implicit val db = Database()
+          try {
             val rows = deleteOldActivities(limit)
             logger.info(s"Deleted ${rows} activity logs")
-          }
+          } finally db.close()
         }
       }
     }

@@ -2,14 +2,11 @@ package gitbucket.core.service
 
 import gitbucket.core.model.Profile._
 import profile.simple._
-
 import gitbucket.core.model.{CommitState, CommitStatus, Account}
-import gitbucket.core.util.Implicits._
-import gitbucket.core.util.StringUtil._
-import gitbucket.core.service.RepositoryService.RepositoryInfo
-
 
 trait CommitStatusService {
+  private implicit val dateColumnType = gitbucket.core.model.Profile.dateColumnType
+
   /** insert or update */
   def createCommitStatus(userName: String, repositoryName: String, sha:String, context:String, state:CommitState, targetUrl:Option[String], description:Option[String], now:java.util.Date, creator:Account)(implicit s: Session): Int =
     CommitStatuses.filter(t => t.byCommit(userName, repositoryName, sha) && t.context===context.bind )

@@ -7,9 +7,17 @@ import gitbucket.core.util.StringUtil._
 import gitbucket.core.util.Implicits._
 import gitbucket.core.model._
 
-import scala.slick.jdbc.{StaticQuery => Q}
+import slick.jdbc._
+import slick.jdbc.{StaticQuery => Q}
 import Q.interpolation
 
+import scala.concurrent.{Future, Await}
+// TODO
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.Duration
+
+// TODO Why is direct import required?
+import gitbucket.core.model.Profile.dateColumnType
 
 trait IssuesService {
   import IssuesService._
@@ -142,11 +150,11 @@ trait IssuesService {
                  (implicit s: Session): List[IssueInfo] = {
     // get issues and comment count and labels
     val result = searchIssueQueryBase(condition, pullRequest, offset, limit, repos)
-        .leftJoin (IssueLabels) .on { case ((t1, t2), t3) => t1.byIssue(t3.userName, t3.repositoryName, t3.issueId) }
-        .leftJoin (Labels)      .on { case (((t1, t2), t3), t4) => t3.byLabel(t4.userName, t4.repositoryName, t4.labelId) }
-        .leftJoin (Milestones)  .on { case ((((t1, t2), t3), t4), t5) => t1.byMilestone(t5.userName, t5.repositoryName, t5.milestoneId) }
+        .joinLeft (IssueLabels) .on { case ((t1, t2), t3) => t1.byIssue(t3.userName, t3.repositoryName, t3.issueId) }
+        .joinLeft (Labels)      .on { case (((t1, t2), t3), t4) => t3.map(_.byLabel(t4.userName, t4.repositoryName, t4.labelId)) }
+        .joinLeft (Milestones)  .on { case ((((t1, t2), t3), t4), t5) => t1.byMilestone(t5.userName, t5.repositoryName, t5.milestoneId) }
         .map { case ((((t1, t2), t3), t4), t5) =>
-          (t1, t2.commentCount, t4.labelId.?, t4.labelName.?, t4.color.?, t5.title.?)
+          (t1, t2.commentCount, t4.map(_.labelId), t4.map(_.labelName), t4.map(_.color), t5.map(_.title))
         }
         .list
         .splitWith { (c1, c2) =>
@@ -154,6 +162,7 @@ trait IssuesService {
           c1._1.repositoryName == c2._1.repositoryName &&
           c1._1.issueId        == c2._1.issueId
         }
+
     val status = getCommitStatues(result.map(_.head._1).map(is => (is.userName, is.repositoryName, is.issueId)))
 
     result.map { issues => issues.head match {
@@ -189,18 +198,20 @@ trait IssuesService {
                  (implicit s: Session) =
     searchIssueQuery(repos, condition, pullRequest)
         .innerJoin(IssueOutline).on { (t1, t2) => t1.byIssue(t2.userName, t2.repositoryName, t2.issueId) }
-        .sortBy { case (t1, t2) =>
-          (condition.sort match {
-            case "created"  => t1.registeredDate
-            case "comments" => t2.commentCount
-            case "updated"  => t1.updatedDate
-          }) match {
-            case sort => condition.direction match {
-              case "asc"  => sort asc
-              case "desc" => sort desc
-            }
+        .sortBy { case (t1, t2) => condition.sort match {
+          case "created" => condition.direction match {
+            case "asc"  => t1.registeredDate.asc
+            case "desc" => t1.registeredDate.desc
           }
-        }
+          case "comments" => condition.direction match {
+            case "asc"  => t2.commentCount.asc
+            case "desc" => t2.commentCount.desc
+          }
+          case "updated" => condition.direction match {
+            case "asc"  => t1.updatedDate.asc
+            case "desc" => t1.updatedDate.desc
+          }
+        }}
         .drop(offset).take(limit)
 
 

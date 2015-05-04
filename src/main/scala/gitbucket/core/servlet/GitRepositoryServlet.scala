@@ -106,6 +106,8 @@ class CommitLogHook(owner: String, repository: String, pusher: String, baseUrl: 
   private val logger = LoggerFactory.getLogger(classOf[CommitLogHook])
   private var existIds: Seq[String] = Nil
 
+  private implicit val db = session.database
+
   def onPreReceive(receivePack: ReceivePack, commands: java.util.Collection[ReceiveCommand]): Unit = {
     try {
       using(Git.open(Directory.getRepositoryDir(owner, repository))) { git =>

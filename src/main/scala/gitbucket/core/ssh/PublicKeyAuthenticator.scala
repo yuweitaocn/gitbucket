@@ -9,14 +9,15 @@ import java.security.PublicKey
 class PublicKeyAuthenticator extends PublickeyAuthenticator with SshKeyService {
 
   override def authenticate(username: String, key: PublicKey, session: ServerSession): Boolean = {
-    Database() withSession { implicit session =>
+    implicit val db = Database()
+    try {
       getPublicKeys(username).exists { sshKey =>
         SshUtil.str2PublicKey(sshKey.publicKey) match {
           case Some(publicKey) => key.equals(publicKey)
           case _ => false
         }
       }
-    }
+    } finally db.close()
   }
 
 }

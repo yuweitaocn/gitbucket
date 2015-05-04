@@ -20,6 +20,8 @@ object Implicits {
   // Convert to slick session.
   implicit def request2Session(implicit request: HttpServletRequest): JdbcBackend#Session = Database.getSession(request)
 
+  implicit def request2database(implicit request: HttpServletRequest): JdbcBackend#Database = Database.getSession(request).database
+
   implicit def context2ApiJsonFormatContext(implicit context: Context): JsonFormat.Context = JsonFormat.Context(context.baseUrl)
 
   implicit class RichSeq[A](seq: Seq[A]) {

@@ -72,11 +72,13 @@ abstract class GitCommand(val owner: String, val repoName: String) extends Comma
   }
 
   protected def isWritableUser(username: String, repositoryInfo: RepositoryService.RepositoryInfo)
-                              (implicit session: Session): Boolean =
+                              (implicit session: Session): Boolean = {
+    implicit val db = session.database // TODO
     getAccountByUserName(username) match {
       case Some(account) => hasWritePermission(repositoryInfo.owner, repositoryInfo.name, Some(account))
       case None => false
     }
+  }
 
 }
 
@@ -84,6 +86,8 @@ class GitUploadPack(owner: String, repoName: String, baseUrl: String) extends Gi
     with RepositoryService with AccountService {
 
   override protected def runTask(user: String)(implicit session: Session): Unit = {
+    implicit val db = session.database // TODO
+
     getRepository(owner, repoName.replaceFirst("\\.wiki\\Z", ""), baseUrl).foreach { repositoryInfo =>
       if(!repositoryInfo.repository.isPrivate || isWritableUser(user, repositoryInfo)){
         using(Git.open(getRepositoryDir(owner, repoName))) { git =>
@@ -101,6 +105,8 @@ class GitReceivePack(owner: String, repoName: String, baseUrl: String) extends G
     with SystemSettingsService with RepositoryService with AccountService {
 
   override protected def runTask(user: String)(implicit session: Session): Unit = {
+    implicit val db = session.database // TODO
+
     getRepository(owner, repoName.replaceFirst("\\.wiki\\Z", ""), baseUrl).foreach { repositoryInfo =>
       if(isWritableUser(user, repositoryInfo)){
         using(Git.open(getRepositoryDir(owner, repoName))) { git =>

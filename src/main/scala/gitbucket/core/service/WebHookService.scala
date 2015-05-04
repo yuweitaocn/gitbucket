@@ -3,7 +3,7 @@ package gitbucket.core.service
 import gitbucket.core.api._
 import gitbucket.core.model.{WebHook, Account, Issue, PullRequest, IssueComment}
 import gitbucket.core.model.Profile._
-import profile.simple._
+import profile.api._
 import gitbucket.core.util.JGitUtil.CommitInfo
 import gitbucket.core.util.RepositoryName
 import gitbucket.core.service.RepositoryService.RepositoryInfo
@@ -20,16 +20,20 @@ trait WebHookService {
 
   private val logger = LoggerFactory.getLogger(classOf[WebHookService])
 
-  def getWebHookURLs(owner: String, repository: String)(implicit s: Session): List[WebHook] =
-    WebHooks.filter(_.byRepository(owner, repository)).sortBy(_.url).list
+  def getWebHookURLs(owner: String, repository: String)(implicit db: Database): List[WebHook] = run {
+    WebHooks.filter(_.byRepository(owner, repository)).sortBy(_.url).result
+  }.toList
 
-  def addWebHookURL(owner: String, repository: String, url :String)(implicit s: Session): Unit =
-    WebHooks insert WebHook(owner, repository, url)
+  def addWebHookURL(owner: String, repository: String, url :String)(implicit db: Database): Unit = run {
+    WebHooks += WebHook(owner, repository, url)
+  }
 
-  def deleteWebHookURL(owner: String, repository: String, url :String)(implicit s: Session): Unit =
+  def deleteWebHookURL(owner: String, repository: String, url :String)(implicit db: Database): Unit = run {
     WebHooks.filter(_.byPrimaryKey(owner, repository, url)).delete
+  }
 
-  def callWebHookOf(owner: String, repository: String, eventName: String)(makePayload: => Option[WebHookPayload])(implicit s: Session, c: JsonFormat.Context): Unit = {
+  def callWebHookOf(owner: String, repository: String, eventName: String)(makePayload: => Option[WebHookPayload])
+                   (implicit db: Database, c: JsonFormat.Context): Unit = {
     val webHookURLs = getWebHookURLs(owner, repository)
     if(webHookURLs.nonEmpty){
       makePayload.map(callWebHook(eventName, webHookURLs, _))
@@ -77,9 +81,13 @@ trait WebHookService {
 trait WebHookPullRequestService extends WebHookService {
   self: AccountService with RepositoryService with PullRequestService with IssuesService =>
 
+  import profile.simple._
   import WebHookService._
   // https://developer.github.com/v3/activity/events/types/#issuesevent
-  def callIssuesWebHook(action: String, repository: RepositoryService.RepositoryInfo, issue: Issue, baseUrl: String, sender: Account)(implicit s: Session, context:JsonFormat.Context): Unit = {
+  def callIssuesWebHook(action: String, repository: RepositoryService.RepositoryInfo, issue: Issue, baseUrl: String, sender: Account)
+                       (implicit s: Session, context:JsonFormat.Context): Unit = {
+    implicit val db = s.database // TODO
+
     callWebHookOf(repository.owner, repository.name, "issues"){
       val users = getAccountsByUserNames(Set(repository.owner, issue.openedUserName), Set(sender))
       for{
@@ -98,6 +106,8 @@ trait WebHookPullRequestService extends WebHookService {
 
   def callPullRequestWebHook(action: String, repository: RepositoryService.RepositoryInfo, issueId: Int, baseUrl: String, sender: Account)(implicit s: Session, context:JsonFormat.Context): Unit = {
     import WebHookService._
+    implicit val db = s.database // TODO
+
     callWebHookOf(repository.owner, repository.name, "pull_request"){
       for{
         (issue, pullRequest) <- getPullRequest(repository.owner, repository.name, issueId)
@@ -138,8 +148,11 @@ trait WebHookPullRequestService extends WebHookService {
       ((is, iu, pr, bu, ru), wh)
     }).list.groupBy(_._1).mapValues(_.map(_._2))
 
-  def callPullRequestWebHookByRequestBranch(action: String, requestRepository: RepositoryService.RepositoryInfo, requestBranch: String, baseUrl: String, sender: Account)(implicit s: Session, context:JsonFormat.Context): Unit = {
+  def callPullRequestWebHookByRequestBranch(action: String, requestRepository: RepositoryService.RepositoryInfo,
+                                            requestBranch: String, baseUrl: String, sender: Account)
+                                           (implicit s: Session, context:JsonFormat.Context): Unit = {
     import WebHookService._
+    implicit val db = s.database // TODO
     for{
       ((issue, issueUser, pullRequest, baseOwner, headOwner), webHooks) <- getPullRequestsByRequestForWebhook(requestRepository.owner, requestRepository.name, requestBranch)
       baseRepo <- getRepository(pullRequest.userName, pullRequest.repositoryName, baseUrl)
@@ -164,6 +177,8 @@ trait WebHookIssueCommentService extends WebHookPullRequestService {
 
   import WebHookService._
   def callIssueCommentWebHook(repository: RepositoryService.RepositoryInfo, issue: Issue, issueCommentId: Int, sender: Account)(implicit s: Session, context:JsonFormat.Context): Unit = {
+    implicit val db = s.database // TODO
+
     callWebHookOf(repository.owner, repository.name, "issue_comment"){
       for{
         issueComment <- getComment(repository.owner, repository.name, issueCommentId.toString())

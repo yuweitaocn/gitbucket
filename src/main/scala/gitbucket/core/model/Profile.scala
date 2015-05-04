@@ -1,5 +1,11 @@
 package gitbucket.core.model
 
+import slick.dbio.{NoStream, DBIOAction}
+import slick.jdbc.JdbcBackend
+
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+
 
 trait Profile {
   val profile: slick.driver.JdbcProfile
@@ -24,6 +30,11 @@ trait Profile {
    * Returns system date.
    */
   def currentDate = new java.util.Date()
+
+  def run[R](a: profile.api.DBIOAction[R, NoStream, Nothing])(implicit db: JdbcBackend#Database): R = {
+    val f = db.run(a)
+    Await.result(f, Duration.Inf)
+  }
 
 }
 
