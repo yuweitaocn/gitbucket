@@ -66,7 +66,9 @@ object MyBuild extends Build {
       "com.typesafe" % "config" % "1.2.1",
       "com.typesafe.play" %% "twirl-compiler" % "1.0.4",
       "com.typesafe.akka" %% "akka-actor" % "2.3.10",
-      "com.enragedginger" %% "akka-quartz-scheduler" % "1.3.0-akka-2.3.x"
+      "com.enragedginger" %% "akka-quartz-scheduler" % "1.3.0-akka-2.3.x",
+      "org.elasticsearch" % "elasticsearch" % "1.5.2",
+      "com.sksamuel.elastic4s" %% "elastic4s" % "1.5.6"
     ),
     play.twirl.sbt.Import.TwirlKeys.templateImports += "gitbucket.core._",
     EclipseKeys.withSource := true,
