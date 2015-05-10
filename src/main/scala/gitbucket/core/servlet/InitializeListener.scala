@@ -27,6 +27,9 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
     }
     org.h2.Driver.load()
 
+    // Start Elasticsearch server
+    ElasticsearchServer.start()
+
     Database() withTransaction { session =>
       val conn = session.conn
 
@@ -65,6 +68,8 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
     PluginRegistry.shutdown(event.getServletContext, loadSystemSettings())
     // Close datasource
     Database.closeDataSource()
+    // Shutdown Elasticsearch server
+    ElasticsearchServer.shutdown()
   }
 
 }
@@ -85,4 +90,31 @@ class DeleteOldActivityActor extends Actor with SystemSettingsService with Activ
       }
     }
   }
+}
+
+object ElasticsearchServer {
+//  import java.nio.file.Files
+//  import org.apache.commons.io.FileUtils
+//  import org.elasticsearch.client.Client
+  import org.elasticsearch.common.settings.ImmutableSettings
+  import org.elasticsearch.node.Node
+  import org.elasticsearch.node.NodeBuilder._
+  import gitbucket.core.util.Directory
+
+  private var node: Node = null
+  //def client: Client = node.client
+
+  def start(): Unit = {
+    val settings = ImmutableSettings.settingsBuilder
+      .put("path.data", Directory.GitBucketHome)
+      .put("cluster.name", "elasticsearch")
+      .build
+    node = nodeBuilder().local(true).settings(settings).build
+    node.start()
+  }
+
+  def shutdown(): Unit = {
+    node.close()
+  }
+
 }
