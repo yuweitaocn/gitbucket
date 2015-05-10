@@ -6,6 +6,7 @@ import gitbucket.core.plugin.PluginRegistry
 import gitbucket.core.service.{ActivityService, SystemSettingsService}
 import org.apache.commons.io.FileUtils
 import javax.servlet.{ServletContextListener, ServletContextEvent}
+import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder
 import org.slf4j.LoggerFactory
 import gitbucket.core.util.Versions
 import akka.actor.{Actor, Props, ActorSystem}
@@ -93,24 +94,62 @@ class DeleteOldActivityActor extends Actor with SystemSettingsService with Activ
 }
 
 object ElasticsearchServer {
-//  import java.nio.file.Files
-//  import org.apache.commons.io.FileUtils
-//  import org.elasticsearch.client.Client
+  import java.io.File
+  import org.elasticsearch.client.Client
   import org.elasticsearch.common.settings.ImmutableSettings
   import org.elasticsearch.node.Node
   import org.elasticsearch.node.NodeBuilder._
   import gitbucket.core.util.Directory
 
   private var node: Node = null
-  //def client: Client = node.client
+  def client: Client = node.client
 
   def start(): Unit = {
+    // Delete index data at first during experimental
+    FileUtils.deleteDirectory(new File(Directory.GitBucketHome, "elasticsearch"))
+
     val settings = ImmutableSettings.settingsBuilder
       .put("path.data", Directory.GitBucketHome)
       .put("cluster.name", "elasticsearch")
       .build
     node = nodeBuilder().local(true).settings(settings).build
     node.start()
+
+    // Create index
+    val request = new CreateIndexRequestBuilder(client.admin.indices)
+      .setIndex("activity")
+      .setSource(
+        """
+          |{
+          |  "activity" : {
+          |    "mappings" : {
+          |      "story" : {
+          |        "properties" : {
+          |          "activityUserName" : {
+          |            "type" : "string"
+          |          },
+          |          "activityType" : {
+          |            "type" : "string"
+          |          },
+          |          "message" : {
+          |            "type" : "string"
+          |          },
+          |          "additionalInfo" : {
+          |            "type" : "string"
+          |          },
+          |          "activityDate" : {
+          |            "type" : "date",
+          |            "format" : "dateOptionalTime"
+          |          }
+          |        }
+          |      }
+          |    }
+          |  }
+          |}
+        """.stripMargin)
+
+    val response = request.get()
+    println(response)
   }
 
   def shutdown(): Unit = {
