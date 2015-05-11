@@ -1,7 +1,11 @@
 package gitbucket.core.servlet
 
 import akka.event.Logging
+import com.sksamuel.elastic4s.ElasticClient
+import com.sksamuel.elastic4s.ElasticDsl._
+import com.sksamuel.elastic4s.source.ObjectSource
 import com.typesafe.config.ConfigFactory
+import gitbucket.core.model.Activity
 import gitbucket.core.plugin.PluginRegistry
 import gitbucket.core.service.{ActivityService, SystemSettingsService}
 import org.apache.commons.io.FileUtils
@@ -9,6 +13,7 @@ import javax.servlet.{ServletContextListener, ServletContextEvent}
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder
 import org.slf4j.LoggerFactory
 import gitbucket.core.util.Versions
+import gitbucket.core.util.JDBCUtil._
 import akka.actor.{Actor, Props, ActorSystem}
 import com.typesafe.akka.extension.quartz.QuartzSchedulerExtension
 import AutoUpdate._
@@ -32,7 +37,27 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
     ElasticsearchServer.start()
 
     Database() withTransaction { session =>
-      val conn = session.conn
+      implicit val conn = session.conn
+      val client = ElasticClient.remote("localhost", 9300)
+
+      // Insert activity data into Elasticsearch
+      conn.select("SELECT * FROM ACTIVITY"){ rs =>
+        val activity = Activity(
+          userName         = rs.getString("USER_NAME"),
+          repositoryName   = rs.getString("REPOSITORY_NAME"),
+          activityUserName = rs.getString("ACTIVITY_USER_NAME"),
+          activityType     = rs.getString("ACTIVITY_TYPE"),
+          message          = rs.getString("MESSAGE"),
+          additionalInfo   = Option(rs.getString("ADDITIONAL_INFO")),
+          activityDate     = rs.getTimestamp("ACTIVITY_DATE"),
+          activityId       = rs.getInt("ACTIVITY_ID")
+        )
+        client.execute {
+          // the band object will be implicitly converted into a DocumentSource
+          index into "gitbucket" / "activity" doc ObjectSource(activity)
+        }
+      }
+
 
       // Migration
       logger.debug("Start schema update")
@@ -111,36 +136,37 @@ object ElasticsearchServer {
     val settings = ImmutableSettings.settingsBuilder
       .put("path.data", Directory.GitBucketHome)
       .put("cluster.name", "elasticsearch")
+      .put("node.name", "gitbucket1")
+//      .put("http.enabled", false)
+//      .put("node.http.enabled", false)
       .build
-    node = nodeBuilder().local(true).settings(settings).build
+    node = nodeBuilder().local(false).settings(settings).build
     node.start()
 
     // Create index
     val request = new CreateIndexRequestBuilder(client.admin.indices)
-      .setIndex("activity")
+      .setIndex("gitbucket")
       .setSource(
         """
           |{
           |  "activity" : {
           |    "mappings" : {
-          |      "story" : {
-          |        "properties" : {
-          |          "activityUserName" : {
-          |            "type" : "string"
-          |          },
-          |          "activityType" : {
-          |            "type" : "string"
-          |          },
-          |          "message" : {
-          |            "type" : "string"
-          |          },
-          |          "additionalInfo" : {
-          |            "type" : "string"
-          |          },
-          |          "activityDate" : {
-          |            "type" : "date",
-          |            "format" : "dateOptionalTime"
-          |          }
+          |      "properties" : {
+          |        "activityUserName" : {
+          |          "type" : "string"
+          |        },
+          |        "activityType" : {
+          |          "type" : "string"
+          |        },
+          |        "message" : {
+          |          "type" : "string"
+          |        },
+          |        "additionalInfo" : {
+          |          "type" : "string"
+          |        },
+          |        "activityDate" : {
+          |          "type" : "date",
+          |          "format" : "dateOptionalTime"
           |        }
           |      }
           |    }
@@ -149,7 +175,9 @@ object ElasticsearchServer {
         """.stripMargin)
 
     val response = request.get()
+    println("*************************************")
     println(response)
+    println("*************************************")
   }
 
   def shutdown(): Unit = {
