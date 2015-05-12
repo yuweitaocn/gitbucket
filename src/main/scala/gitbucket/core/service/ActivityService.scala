@@ -1,9 +1,16 @@
 package gitbucket.core.service
 
+import java.util.Date
+
+import com.sksamuel.elastic4s.ElasticClient
+import com.sksamuel.elastic4s.ElasticDsl._
 import gitbucket.core.model.Activity
 import gitbucket.core.model.Profile._
+import gitbucket.core.servlet.ElasticsearchServer
 import gitbucket.core.util.JGitUtil
 import profile.simple._
+import scala.collection.JavaConverters._
+import scala.collection.JavaConversions._
 
 trait ActivityService {
 
@@ -28,14 +35,33 @@ trait ActivityService {
       .take(30)
       .list
 
-  def getRecentActivities()(implicit s: Session): List[Activity] =
-    Activities
-      .innerJoin(Repositories).on((t1, t2) => t1.byRepository(t2.userName, t2.repositoryName))
-      .filter { case (t1, t2) =>  t2.isPrivate === false.bind }
-      .sortBy { case (t1, t2) => t1.activityId desc }
-      .map    { case (t1, t2) => t1 }
-      .take(30)
-      .list
+  def getRecentActivities()(implicit s: Session): List[Activity] = {
+    val client = ElasticsearchServer.client
+    val response = client.execute {
+      // TODO only private repository activities
+      search in "gitbucket" / "activity" limit 30
+    }.await
+    response.getHits.getHits().map { hit =>
+      val map = hit.sourceAsMap.asScala
+      Activity(
+        userName         = map("userName").asInstanceOf[String],
+        repositoryName   = map("repositoryName").asInstanceOf[String],
+        activityUserName = map("activityUserName").asInstanceOf[String],
+        activityType     = map("activityType").asInstanceOf[String],
+        message          = map("message").asInstanceOf[String],
+        additionalInfo   = map.get("additionalInfo").map(_.asInstanceOf[String]),
+        activityDate     = new Date(map("activityDate").asInstanceOf[Long]),
+        activityId       = map("activityId").asInstanceOf[Int]
+      )
+    }.toList
+  }
+//    Activities
+//      .innerJoin(Repositories).on((t1, t2) => t1.byRepository(t2.userName, t2.repositoryName))
+//      .filter { case (t1, t2) =>  t2.isPrivate === false.bind }
+//      .sortBy { case (t1, t2) => t1.activityId desc }
+//      .map    { case (t1, t2) => t1 }
+//      .take(30)
+//      .list
 
   def getRecentActivitiesByOwners(owners : Set[String])(implicit s: Session): List[Activity] =
     Activities

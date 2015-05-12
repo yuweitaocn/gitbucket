@@ -38,7 +38,7 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
 
     Database() withTransaction { session =>
       implicit val conn = session.conn
-      val client = ElasticClient.remote("localhost", 9300)
+      val client = ElasticsearchServer.client //ElasticClient.remote("localhost", 9300)
 
       // Insert activity data into Elasticsearch
       conn.select("SELECT * FROM ACTIVITY"){ rs =>
@@ -55,7 +55,7 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
         client.execute {
           // the band object will be implicitly converted into a DocumentSource
           index into "gitbucket" / "activity" doc ObjectSource(activity)
-        }
+        }.await
       }
 
 
@@ -125,9 +125,12 @@ object ElasticsearchServer {
   import org.elasticsearch.node.Node
   import org.elasticsearch.node.NodeBuilder._
   import gitbucket.core.util.Directory
+  import gitbucket.core.util.ControlUtil._
 
   private var node: Node = null
-  def client: Client = node.client
+  private var _client: ElasticClient = null
+
+  def client = _client
 
   def start(): Unit = {
     // Delete index data at first during experimental
@@ -143,44 +146,46 @@ object ElasticsearchServer {
     node = nodeBuilder().local(false).settings(settings).build
     node.start()
 
-    // Create index
-    val request = new CreateIndexRequestBuilder(client.admin.indices)
-      .setIndex("gitbucket")
-      .setSource(
-        """
-          |{
-          |  "activity" : {
-          |    "mappings" : {
-          |      "properties" : {
-          |        "activityUserName" : {
-          |          "type" : "string"
-          |        },
-          |        "activityType" : {
-          |          "type" : "string"
-          |        },
-          |        "message" : {
-          |          "type" : "string"
-          |        },
-          |        "additionalInfo" : {
-          |          "type" : "string"
-          |        },
-          |        "activityDate" : {
-          |          "type" : "date",
-          |          "format" : "dateOptionalTime"
-          |        }
-          |      }
-          |    }
-          |  }
-          |}
-        """.stripMargin)
+    using(node.client){ client =>
+      // Create index
+      val request = new CreateIndexRequestBuilder(client.admin.indices)
+        .setIndex("gitbucket")
+        .setSource(
+          """
+            |{
+            |  "activity" : {
+            |    "mappings" : {
+            |      "properties" : {
+            |        "activityUserName" : {
+            |          "type" : "string"
+            |        },
+            |        "activityType" : {
+            |          "type" : "string"
+            |        },
+            |        "message" : {
+            |          "type" : "string"
+            |        },
+            |        "additionalInfo" : {
+            |          "type" : "string"
+            |        },
+            |        "activityDate" : {
+            |          "type" : "date",
+            |          "format" : "dateOptionalTime"
+            |        }
+            |      }
+            |    }
+            |  }
+            |}
+          """.stripMargin)
 
-    val response = request.get()
-    println("*************************************")
-    println(response)
-    println("*************************************")
+      request.get()
+    }
+
+    _client = ElasticClient.fromNode(node)
   }
 
   def shutdown(): Unit = {
+    _client.close()
     node.close()
   }
 
