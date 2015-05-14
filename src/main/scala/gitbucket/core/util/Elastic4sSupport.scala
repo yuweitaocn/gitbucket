@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.{JsonParser, JsonGenerator, Version => JsonVer
 import com.fasterxml.jackson.databind.module.SimpleModule
 import com.fasterxml.jackson.databind._
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
 import org.joda.time.DateTime
 import org.joda.time.format.DateTimeFormat
 import org.elasticsearch.action.search.SearchResponse
@@ -13,7 +14,7 @@ import scala.collection.JavaConverters._
 
 object Elastic4sSupport {
 
-  private val mapper = new ObjectMapper()
+  private val mapper = new ObjectMapper with ScalaObjectMapper
   mapper.enable(DeserializationFeature.UNWRAP_SINGLE_VALUE_ARRAYS)
   mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
   mapper.registerModule(DefaultScalaModule)
