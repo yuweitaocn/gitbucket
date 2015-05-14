@@ -11,6 +11,7 @@ import gitbucket.core.util.JGitUtil
 import profile.simple._
 import scala.collection.JavaConverters._
 import scala.collection.JavaConversions._
+import gitbucket.core.util.Elastic4sSupport._
 
 trait ActivityService {
 
@@ -41,19 +42,8 @@ trait ActivityService {
       // TODO only private repository activities
       search in "gitbucket" / "activity" limit 30
     }.await
-    response.getHits.getHits().map { hit =>
-      val map = hit.sourceAsMap.asScala
-      Activity(
-        userName         = map("userName").asInstanceOf[String],
-        repositoryName   = map("repositoryName").asInstanceOf[String],
-        activityUserName = map("activityUserName").asInstanceOf[String],
-        activityType     = map("activityType").asInstanceOf[String],
-        message          = map("message").asInstanceOf[String],
-        additionalInfo   = map.get("additionalInfo").map(_.asInstanceOf[String]),
-        activityDate     = new Date(map("activityDate").asInstanceOf[Long]),
-        activityId       = map("activityId").asInstanceOf[Int]
-      )
-    }.toList
+    println("Select from Elasticsearch!!")
+    response.docs[Activity].toList
   }
 //    Activities
 //      .innerJoin(Repositories).on((t1, t2) => t1.byRepository(t2.userName, t2.repositoryName))
