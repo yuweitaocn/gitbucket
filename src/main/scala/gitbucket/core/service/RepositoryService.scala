@@ -5,6 +5,12 @@ import gitbucket.core.model.Profile._
 import gitbucket.core.util.JGitUtil
 import profile.simple._
 
+import com.sksamuel.elastic4s.ElasticDsl._
+import com.sksamuel.elastic4s.source.ObjectSource
+import org.elasticsearch.search.sort.SortOrder
+import gitbucket.core.servlet.ElasticsearchServer.client
+import gitbucket.core.util.Elastic4sSupport._
+
 trait RepositoryService { self: AccountService =>
   import RepositoryService._
 
@@ -38,6 +44,29 @@ trait RepositoryService { self: AccountService =>
         parentRepositoryName = parentRepositoryName)
 
     IssueId insert (userName, repositoryName, 0)
+
+    client.execute {
+      index into "gitbucket" / "repository" doc ObjectSource(
+        Repository(
+          userName             = userName,
+          repositoryName       = repositoryName,
+          isPrivate            = isPrivate,
+          description          = description,
+          defaultBranch        = "master",
+          registeredDate       = currentDate,
+          updatedDate          = currentDate,
+          lastActivityDate     = currentDate,
+          originUserName       = originUserName,
+          originRepositoryName = originRepositoryName,
+          parentUserName       = parentUserName,
+          parentRepositoryName = parentRepositoryName
+        )
+      )
+    }.await
+
+    client.execute {
+      refresh index "gitbucket"
+    }.await
   }
 
   def renameRepository(oldUserName: String, oldRepositoryName: String, newUserName: String, newRepositoryName: String)

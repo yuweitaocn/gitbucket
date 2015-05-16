@@ -1,16 +1,13 @@
 package gitbucket.core.service
 
-import java.util.Date
-
-import com.sksamuel.elastic4s.ElasticClient
 import com.sksamuel.elastic4s.ElasticDsl._
+import com.sksamuel.elastic4s.source.ObjectSource
+import org.elasticsearch.search.sort.SortOrder
 import gitbucket.core.model.Activity
 import gitbucket.core.model.Profile._
-import gitbucket.core.servlet.ElasticsearchServer
+import gitbucket.core.servlet.ElasticsearchServer.client
 import gitbucket.core.util.JGitUtil
 import profile.simple._
-import scala.collection.JavaConverters._
-import scala.collection.JavaConversions._
 import gitbucket.core.util.Elastic4sSupport._
 
 trait ActivityService {
@@ -22,9 +19,7 @@ trait ActivityService {
   }
 
   def getActivitiesByUser(activityUserName: String, isPublic: Boolean)(implicit s: Session): List[Activity] = {
-    val client = ElasticsearchServer.client
     val response = client.execute {
-      // TODO sort by activityId desc
       search in "gitbucket" / "activity" postFilter {
         if(isPublic){
           must(
@@ -36,53 +31,72 @@ trait ActivityService {
         } else {
           termFilter("activityUserName", activityUserName)
         }
+      } sort {
+        by field "activityDate" order SortOrder.DESC
       } limit 30
     }.await
     response.docs[Activity].toList
   }
-//    Activities
-//      .innerJoin(Repositories).on((t1, t2) => t1.byRepository(t2.userName, t2.repositoryName))
-//      .filter { case (t1, t2) =>
-//        if(isPublic){
-//          (t1.activityUserName === activityUserName.bind) && (t2.isPrivate === false.bind)
-//        } else {
-//          (t1.activityUserName === activityUserName.bind)
-//        }
-//      }
-//      .sortBy { case (t1, t2) => t1.activityId desc }
-//      .map    { case (t1, t2) => t1 }
-//      .take(30)
-//      .list
 
   def getRecentActivities()(implicit s: Session): List[Activity] = {
-    val client = ElasticsearchServer.client
     val response = client.execute {
-      // TODO sort by activityId desc
       search in "gitbucket" / "activity" postFilter {
         hasParentFilter("repository") filter {
           termFilter("isPrivate", false)
         }
+      } sort {
+        by field "activityDate" order SortOrder.DESC
       } limit 30
     }.await
     response.docs[Activity].toList
   }
 
-  def getRecentActivitiesByOwners(owners : Set[String])(implicit s: Session): List[Activity] =
-    Activities
-      .innerJoin(Repositories).on((t1, t2) => t1.byRepository(t2.userName, t2.repositoryName))
-      .filter { case (t1, t2) => (t2.isPrivate === false.bind) || (t2.userName inSetBind owners) }
-      .sortBy { case (t1, t2) => t1.activityId desc }
-      .map    { case (t1, t2) => t1 }
-      .take(30)
-      .list
+  def getRecentActivitiesByOwners(owners : Set[String])(implicit s: Session): List[Activity] = {
+    val response = client.execute {
+      search in "gitbucket" / "activity" postFilter {
+        should (
+          hasParentFilter("repository") filter {
+            termFilter("isPrivate", false)
+          },
+          termsFilter("userName", owners.toSeq: _*)
+        )
+      } sort {
+        by field "activityDate" order SortOrder.DESC
+      } limit 30
+    }.await
+    response.docs[Activity].toList
+  }
+
+  private def repositoryId(userName: String, repositoryName: String): String = {
+    val response = client.execute {
+      search in "gitbucket" / "repository" query {
+        must(termQuery("userName", userName), termQuery("repositoryName", repositoryName))
+      } fields("_id")
+    }.await
+
+    response.getHits.getHits.head.getId
+  }
 
   def recordCreateRepositoryActivity(userName: String, repositoryName: String, activityUserName: String)
-                                    (implicit s: Session): Unit =
-    Activities insert Activity(userName, repositoryName, activityUserName,
-      "create_repository",
-      s"[user:${activityUserName}] created [repo:${userName}/${repositoryName}]",
-      None,
-      currentDate)
+                                    (implicit s: Session): Unit = {
+    val response = client.execute {
+      index into "gitbucket" / "activity" doc ObjectSource(
+        Activity(
+          userName,
+          repositoryName,
+          activityUserName,
+          "create_repository",
+          s"[user:${activityUserName}] created [repo:${userName}/${repositoryName}]",
+          None,
+          currentDate
+        )
+      ) parent repositoryId(userName, repositoryName)
+    }.await
+
+    client.execute {
+      refresh index "gitbucket"
+    }.await
+  }
 
   def recordCreateIssueActivity(userName: String, repositoryName: String, activityUserName: String, issueId: Int, title: String)
                                (implicit s: Session): Unit =

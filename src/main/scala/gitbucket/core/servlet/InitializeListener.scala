@@ -39,54 +39,83 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
 
     Database() withTransaction { session =>
       implicit val conn = session.conn
-      val client = ElasticsearchServer.client //ElasticClient.remote("localhost", 9300)
 
-      // Insert repository data into Elasticsearch
-      val repositoryId = conn.select("SELECT * FROM REPOSITORY"){ rs =>
-        val repository = Repository(
-          userName             = rs.getString("USER_NAME"),
-          repositoryName       = rs.getString("REPOSITORY_NAME"),
-          isPrivate            = rs.getBoolean("PRIVATE"),
-          description          = Option(rs.getString("DESCRIPTION")),
-          defaultBranch        = rs.getString("DEFAULT_BRANCH"),
-          registeredDate       = rs.getTimestamp("REGISTERED_DATE"),
-          updatedDate          = rs.getTimestamp("UPDATED_DATE"),
-          lastActivityDate     = rs.getTimestamp("LAST_ACTIVITY_DATE"),
-          originUserName       = Option(rs.getString("ORIGIN_USER_NAME")),
-          originRepositoryName = Option(rs.getString("ORIGIN_REPOSITORY_NAME")),
-          parentUserName       = Option(rs.getString("PARENT_USER_NAME")),
-          parentRepositoryName = Option(rs.getString("PARENT_REPOSITORY_NAME"))
-        )
-        val resp = client.execute {
-          // the band object will be implicitly converted into a DocumentSource
-          index into "gitbucket" / "repository" doc ObjectSource(repository)
+      if(ElasticsearchServer.initialize){
+        val client = ElasticsearchServer.client
+
+        client.execute {
+          create index "gitbucket" mappings (
+            "repository" as (
+              "userName"             typed StringType,
+              "repositoryName"       typed StringType,
+              "isPrivate"            typed BooleanType,
+              "description"          typed StringType,
+              "defaultBranch"        typed StringType,
+              "registeredDate"       typed DateType,
+              "updatedDate"          typed DateType,
+              "lastActivityDate"     typed DateType,
+              "originUserName"       typed StringType,
+              "originRepositoryName" typed StringType,
+              "parentUserName"       typed StringType,
+              "parentRepositoryName" typed StringType
+              ),
+            "activity" parent "repository" as (
+              "activityUserName"     typed StringType,
+              "activityType"         typed StringType,
+              "message"              typed StringType,
+              "additionalInfo"       typed StringType,
+              "activityDate"         typed DateType
+              )
+            )
         }.await
 
-        (repository.userName, repository.repositoryName) -> resp.getId
-      }.toMap
+        // Insert repository data into Elasticsearch
+        val repositoryId = conn.select("SELECT * FROM REPOSITORY"){ rs =>
+          val repository = Repository(
+            userName             = rs.getString("USER_NAME"),
+            repositoryName       = rs.getString("REPOSITORY_NAME"),
+            isPrivate            = rs.getBoolean("PRIVATE"),
+            description          = Option(rs.getString("DESCRIPTION")),
+            defaultBranch        = rs.getString("DEFAULT_BRANCH"),
+            registeredDate       = rs.getTimestamp("REGISTERED_DATE"),
+            updatedDate          = rs.getTimestamp("UPDATED_DATE"),
+            lastActivityDate     = rs.getTimestamp("LAST_ACTIVITY_DATE"),
+            originUserName       = Option(rs.getString("ORIGIN_USER_NAME")),
+            originRepositoryName = Option(rs.getString("ORIGIN_REPOSITORY_NAME")),
+            parentUserName       = Option(rs.getString("PARENT_USER_NAME")),
+            parentRepositoryName = Option(rs.getString("PARENT_REPOSITORY_NAME"))
+          )
+          val resp = client.execute {
+            // the band object will be implicitly converted into a DocumentSource
+            index into "gitbucket" / "repository" doc ObjectSource(repository)
+          }.await
 
-      println(repositoryId)
+          (repository.userName, repository.repositoryName) -> resp.getId
+        }.toMap
 
-      // Insert activity data into Elasticsearch
-      conn.select("SELECT * FROM ACTIVITY"){ rs =>
-        val activity = Activity(
-          userName         = rs.getString("USER_NAME"),
-          repositoryName   = rs.getString("REPOSITORY_NAME"),
-          activityUserName = rs.getString("ACTIVITY_USER_NAME"),
-          activityType     = rs.getString("ACTIVITY_TYPE"),
-          message          = rs.getString("MESSAGE"),
-          additionalInfo   = Option(rs.getString("ADDITIONAL_INFO")),
-          activityDate     = rs.getTimestamp("ACTIVITY_DATE"),
-          activityId       = rs.getInt("ACTIVITY_ID")
-        )
+        // Insert activity data into Elasticsearch
+        conn.select("SELECT * FROM ACTIVITY"){ rs =>
+          val activity = Activity(
+            userName         = rs.getString("USER_NAME"),
+            repositoryName   = rs.getString("REPOSITORY_NAME"),
+            activityUserName = rs.getString("ACTIVITY_USER_NAME"),
+            activityType     = rs.getString("ACTIVITY_TYPE"),
+            message          = rs.getString("MESSAGE"),
+            additionalInfo   = Option(rs.getString("ADDITIONAL_INFO")),
+            activityDate     = rs.getTimestamp("ACTIVITY_DATE"),
+            activityId       = rs.getInt("ACTIVITY_ID")
+          )
+          client.execute {
+            // the band object will be implicitly converted into a DocumentSource
+            val id = repositoryId(activity.userName, activity.repositoryName)
+            index into "gitbucket" / "activity" doc ObjectSource(activity) parent id
+          }.await
+        }
+
         client.execute {
-          // the band object will be implicitly converted into a DocumentSource
-          val id = repositoryId(activity.userName, activity.repositoryName)
-          println(id)
-          index into "gitbucket" / "activity" doc ObjectSource(activity) parent id
+          flush index "gitbucket"
         }.await
       }
-
 
       // Migration
       logger.debug("Start schema update")
@@ -153,16 +182,16 @@ object ElasticsearchServer {
   import org.elasticsearch.node.Node
   import org.elasticsearch.node.NodeBuilder._
   import gitbucket.core.util.Directory
-  import gitbucket.core.util.ControlUtil._
 
   private var node: Node = null
   private var _client: ElasticClient = null
 
+  var initialize = false
+
   def client = _client
 
   def start(): Unit = {
-    // Delete index data at first during experimental
-    FileUtils.deleteDirectory(new File(Directory.GitBucketHome, "elasticsearch"))
+    initialize = !(new File(Directory.GitBucketHome, "elasticsearch").exists)
 
     val settings = ImmutableSettings.settingsBuilder
       .put("path.data", Directory.GitBucketHome)
@@ -171,40 +200,11 @@ object ElasticsearchServer {
 //      .put("http.enabled", false)
 //      .put("node.http.enabled", false)
       .build
+
     node = nodeBuilder().local(false).settings(settings).build
     node.start()
 
     _client = ElasticClient.fromNode(node)
-
-    using(node.client){ client =>
-      // Create index
-      val client = ElasticsearchServer.client //ElasticClient.remote("localhost", 9300)
-      client.execute {
-        create index "gitbucket" mappings (
-          "repository" as (
-            "userName"             typed StringType,
-            "repositoryName"       typed StringType,
-            "isPrivate"            typed BooleanType,
-            "description"          typed StringType,
-            "defaultBranch"        typed StringType,
-            "registeredDate"       typed DateType,
-            "updatedDate"          typed DateType,
-            "lastActivityDate"     typed DateType,
-            "originUserName"       typed StringType,
-            "originRepositoryName" typed StringType,
-            "parentUserName"       typed StringType,
-            "parentRepositoryName" typed StringType
-          ),
-          "activity" parent "repository" as (
-            "activityUserName"     typed StringType,
-            "activityType"         typed StringType,
-            "message"              typed StringType,
-            "additionalInfo"       typed StringType,
-            "activityDate"         typed DateType
-          )
-        )
-      }
-    }
   }
 
   def shutdown(): Unit = {
