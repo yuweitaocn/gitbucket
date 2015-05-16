@@ -21,37 +21,51 @@ trait ActivityService {
     } getOrElse 0
   }
 
-  def getActivitiesByUser(activityUserName: String, isPublic: Boolean)(implicit s: Session): List[Activity] =
-    Activities
-      .innerJoin(Repositories).on((t1, t2) => t1.byRepository(t2.userName, t2.repositoryName))
-      .filter { case (t1, t2) =>
-        if(isPublic){
-          (t1.activityUserName === activityUserName.bind) && (t2.isPrivate === false.bind)
-        } else {
-          (t1.activityUserName === activityUserName.bind)
-        }
-      }
-      .sortBy { case (t1, t2) => t1.activityId desc }
-      .map    { case (t1, t2) => t1 }
-      .take(30)
-      .list
-
-  def getRecentActivities()(implicit s: Session): List[Activity] = {
+  def getActivitiesByUser(activityUserName: String, isPublic: Boolean)(implicit s: Session): List[Activity] = {
     val client = ElasticsearchServer.client
     val response = client.execute {
-      // TODO only private repository activities
-      search in "gitbucket" / "activity" limit 30
+      // TODO sort by activityId desc
+      search in "gitbucket" / "activity" postFilter {
+        if(isPublic){
+          must(
+            termFilter("activityUserName", activityUserName),
+            hasParentFilter("repository") filter {
+              termFilter("isPrivate", false)
+            }
+          )
+        } else {
+          termFilter("activityUserName", activityUserName)
+        }
+      } limit 30
     }.await
-    println("Select from Elasticsearch!!")
     response.docs[Activity].toList
   }
 //    Activities
 //      .innerJoin(Repositories).on((t1, t2) => t1.byRepository(t2.userName, t2.repositoryName))
-//      .filter { case (t1, t2) =>  t2.isPrivate === false.bind }
+//      .filter { case (t1, t2) =>
+//        if(isPublic){
+//          (t1.activityUserName === activityUserName.bind) && (t2.isPrivate === false.bind)
+//        } else {
+//          (t1.activityUserName === activityUserName.bind)
+//        }
+//      }
 //      .sortBy { case (t1, t2) => t1.activityId desc }
 //      .map    { case (t1, t2) => t1 }
 //      .take(30)
 //      .list
+
+  def getRecentActivities()(implicit s: Session): List[Activity] = {
+    val client = ElasticsearchServer.client
+    val response = client.execute {
+      // TODO sort by activityId desc
+      search in "gitbucket" / "activity" postFilter {
+        hasParentFilter("repository") filter {
+          termFilter("isPrivate", false)
+        }
+      } limit 30
+    }.await
+    response.docs[Activity].toList
+  }
 
   def getRecentActivitiesByOwners(owners : Set[String])(implicit s: Session): List[Activity] =
     Activities

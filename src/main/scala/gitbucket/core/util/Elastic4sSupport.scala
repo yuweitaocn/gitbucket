@@ -8,6 +8,9 @@ import org.elasticsearch.action.search.SearchResponse
 import scala.reflect.ClassTag
 import scala.collection.JavaConverters._
 
+/**
+ * Extends elastic4s
+ */
 object Elastic4sSupport {
 
   private val mapper = new ObjectMapper with ScalaObjectMapper
@@ -19,6 +22,10 @@ object Elastic4sSupport {
 
   private def deserialize[T](json: String)(implicit c: ClassTag[T]): T = mapper.readValue(json, c.runtimeClass).asInstanceOf[T]
 
+  /**
+   * Modify the flat map to the structured map.
+   * Nested keys like `aaa.bbb -> ccc` to nested map `Map(aaa -> Map(bbb -> ccc))`.
+   */
   private def structuredMap(map: Map[String, AnyRef]): Map[String, AnyRef] = {
     def structuredMap0(group: List[(List[String], AnyRef)]): AnyRef = {
       group.groupBy { case (key, value) => key.head }.map { case (key, value) =>
@@ -35,6 +42,10 @@ object Elastic4sSupport {
   }
 
   implicit class RichRichSearchResponse(resp: SearchResponse){
+    /**
+     * Get search results as the sequence of the case class.
+     * This method maps the `_source` to the case class. If `_source` is empty, use `fields` instead of it.
+     */
     def docs[T](implicit c: ClassTag[T]): Seq[T] = {
       resp.getHits.getHits.flatMap { hit =>
         Option(hit.sourceAsString).map { json =>

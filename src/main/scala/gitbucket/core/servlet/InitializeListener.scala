@@ -3,9 +3,10 @@ package gitbucket.core.servlet
 import akka.event.Logging
 import com.sksamuel.elastic4s.ElasticClient
 import com.sksamuel.elastic4s.ElasticDsl._
+import com.sksamuel.elastic4s.mappings.FieldType._
 import com.sksamuel.elastic4s.source.ObjectSource
 import com.typesafe.config.ConfigFactory
-import gitbucket.core.model.Activity
+import gitbucket.core.model.{Repository, Activity}
 import gitbucket.core.plugin.PluginRegistry
 import gitbucket.core.service.{ActivityService, SystemSettingsService}
 import org.apache.commons.io.FileUtils
@@ -40,6 +41,32 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
       implicit val conn = session.conn
       val client = ElasticsearchServer.client //ElasticClient.remote("localhost", 9300)
 
+      // Insert repository data into Elasticsearch
+      val repositoryId = conn.select("SELECT * FROM REPOSITORY"){ rs =>
+        val repository = Repository(
+          userName             = rs.getString("USER_NAME"),
+          repositoryName       = rs.getString("REPOSITORY_NAME"),
+          isPrivate            = rs.getBoolean("PRIVATE"),
+          description          = Option(rs.getString("DESCRIPTION")),
+          defaultBranch        = rs.getString("DEFAULT_BRANCH"),
+          registeredDate       = rs.getTimestamp("REGISTERED_DATE"),
+          updatedDate          = rs.getTimestamp("UPDATED_DATE"),
+          lastActivityDate     = rs.getTimestamp("LAST_ACTIVITY_DATE"),
+          originUserName       = Option(rs.getString("ORIGIN_USER_NAME")),
+          originRepositoryName = Option(rs.getString("ORIGIN_REPOSITORY_NAME")),
+          parentUserName       = Option(rs.getString("PARENT_USER_NAME")),
+          parentRepositoryName = Option(rs.getString("PARENT_REPOSITORY_NAME"))
+        )
+        val resp = client.execute {
+          // the band object will be implicitly converted into a DocumentSource
+          index into "gitbucket" / "repository" doc ObjectSource(repository)
+        }.await
+
+        (repository.userName, repository.repositoryName) -> resp.getId
+      }.toMap
+
+      println(repositoryId)
+
       // Insert activity data into Elasticsearch
       conn.select("SELECT * FROM ACTIVITY"){ rs =>
         val activity = Activity(
@@ -54,7 +81,9 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
         )
         client.execute {
           // the band object will be implicitly converted into a DocumentSource
-          index into "gitbucket" / "activity" doc ObjectSource(activity)
+          val id = repositoryId(activity.userName, activity.repositoryName)
+          println(id)
+          index into "gitbucket" / "activity" doc ObjectSource(activity) parent id
         }.await
       }
 
@@ -120,7 +149,6 @@ class DeleteOldActivityActor extends Actor with SystemSettingsService with Activ
 
 object ElasticsearchServer {
   import java.io.File
-  import org.elasticsearch.client.Client
   import org.elasticsearch.common.settings.ImmutableSettings
   import org.elasticsearch.node.Node
   import org.elasticsearch.node.NodeBuilder._
@@ -146,42 +174,37 @@ object ElasticsearchServer {
     node = nodeBuilder().local(false).settings(settings).build
     node.start()
 
+    _client = ElasticClient.fromNode(node)
+
     using(node.client){ client =>
       // Create index
-      val request = new CreateIndexRequestBuilder(client.admin.indices)
-        .setIndex("gitbucket")
-        .setSource(
-          """
-            |{
-            |  "activity" : {
-            |    "mappings" : {
-            |      "properties" : {
-            |        "activityUserName" : {
-            |          "type" : "string"
-            |        },
-            |        "activityType" : {
-            |          "type" : "string"
-            |        },
-            |        "message" : {
-            |          "type" : "string"
-            |        },
-            |        "additionalInfo" : {
-            |          "type" : "string"
-            |        },
-            |        "activityDate" : {
-            |          "type" : "date",
-            |          "format" : "dateOptionalTime"
-            |        }
-            |      }
-            |    }
-            |  }
-            |}
-          """.stripMargin)
-
-      request.get()
+      val client = ElasticsearchServer.client //ElasticClient.remote("localhost", 9300)
+      client.execute {
+        create index "gitbucket" mappings (
+          "repository" as (
+            "userName"             typed StringType,
+            "repositoryName"       typed StringType,
+            "isPrivate"            typed BooleanType,
+            "description"          typed StringType,
+            "defaultBranch"        typed StringType,
+            "registeredDate"       typed DateType,
+            "updatedDate"          typed DateType,
+            "lastActivityDate"     typed DateType,
+            "originUserName"       typed StringType,
+            "originRepositoryName" typed StringType,
+            "parentUserName"       typed StringType,
+            "parentRepositoryName" typed StringType
+          ),
+          "activity" parent "repository" as (
+            "activityUserName"     typed StringType,
+            "activityType"         typed StringType,
+            "message"              typed StringType,
+            "additionalInfo"       typed StringType,
+            "activityDate"         typed DateType
+          )
+        )
+      }
     }
-
-    _client = ElasticClient.fromNode(node)
   }
 
   def shutdown(): Unit = {
