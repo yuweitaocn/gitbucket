@@ -3,8 +3,12 @@ package gitbucket.core.util
 import com.fasterxml.jackson.databind._
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
+import com.sksamuel.elastic4s.{Executable, ElasticClient}
 import org.elasticsearch.action.search.SearchResponse
 
+import com.sksamuel.elastic4s.ElasticDsl._
+import com.sksamuel.elastic4s.source.ObjectSource
+import scala.concurrent.Future
 import scala.reflect.ClassTag
 import scala.collection.JavaConverters._
 
@@ -39,6 +43,27 @@ object Elastic4sSupport {
 
     val list = map.map { case (key, value) => key.split("\\.").toList -> value }.toList
     structuredMap0(list).asInstanceOf[Map[String, AnyRef]]
+  }
+
+  implicit class RichElasticClient(client: ElasticClient){
+    /**
+     * Update and flush index synchronously.
+     */
+    def update[T, R](t: T)(implicit executable: Executable[T, R]): R = {
+      val result = client.execute(t).await
+      client.execute {
+        flush index "gitbucket"
+      }.await
+      result
+    }
+
+    /**
+     * Search synchronously.
+     */
+    def search[T, R](t: T)(implicit executable: Executable[T, R]): R = {
+      val result = client.execute(t).await
+      result
+    }
   }
 
   implicit class RichRichSearchResponse(resp: SearchResponse){
