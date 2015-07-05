@@ -1,7 +1,5 @@
 package gitbucket.core.util
 
-import gitbucket.core.model._
-import gitbucket.core.util.Directory._
 import gitbucket.core.util.ControlUtil._
 
 import org.apache.commons.io.FileUtils
@@ -14,7 +12,6 @@ import org.eclipse.jgit.merge._
 import org.eclipse.jgit.errors._
 
 import java.nio.file._
-import java.util.Date
 import java.io.File
 
 object GitSpecUtil {
