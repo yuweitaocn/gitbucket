@@ -15,7 +15,7 @@ import java.nio.file._
 import java.io.File
 
 object GitSpecUtil {
-  def withTestFolder[U](f: File => U) {
+  def withTestFolder[U](f: File => U): U = {
     val folder = new File(System.getProperty("java.io.tmpdir"), "test-" + System.nanoTime)
     if(!folder.mkdirs()){
       throw new java.io.IOException("can't create folder "+folder.getAbsolutePath)
@@ -26,7 +26,7 @@ object GitSpecUtil {
       FileUtils.deleteQuietly(folder)
     }
   }
-  def withTestRepository[U](f: Git => U) = withTestFolder(folder => using(Git.open(createTestRepository(folder)))(f))
+  def withTestRepository[U](f: Git => U): U = withTestFolder(folder => using(Git.open(createTestRepository(folder)))(f))
   def createTestRepository(dir: File): File = {
     RepositoryCache.clear()
     FileUtils.deleteQuietly(dir)
@@ -36,7 +36,7 @@ object GitSpecUtil {
   }
   def createFile(git: Git, branch: String, name: String, content: String,
                  autorName: String = "dummy", autorEmail: String = "dummy@example.com",
-                 message: String = "test commit") {
+                 message: String = "test commit") = {
     val builder = DirCache.newInCore.builder()
     val inserter = git.getRepository.newObjectInserter()
     val headId = git.getRepository.resolve(branch + "^{commit}")

@@ -38,6 +38,7 @@ object MyBuild extends Build {
     scalaVersion := ScalaVersion,
     resolvers ++= Seq(
       Classpaths.typesafeReleases,
+      "Scalaz Bintray Repo" at "https://dl.bintray.com/scalaz/releases",
       "amateras-repo" at "http://amateras.sourceforge.jp/mvn/"
     ),
     scalacOptions := Seq("-deprecation", "-language:postfixOps"),
