@@ -1,7 +1,7 @@
 package gitbucket.core.model
 
 protected[model] trait TemplateComponent { self: Profile =>
-  import profile.simple._
+  import profile.api._
 
   trait BasicTemplate { self: Table[_] =>
     val userName = column[String]("USER_NAME")
@@ -10,7 +10,7 @@ protected[model] trait TemplateComponent { self: Profile =>
     def byRepository(owner: String, repository: String) =
       (userName === owner.bind) && (repositoryName === repository.bind)
 
-    def byRepository(userName: Column[String], repositoryName: Column[String]) =
+    def byRepository(userName: Rep[String], repositoryName: Rep[String]) =
       (this.userName === userName) && (this.repositoryName === repositoryName)
   }
 
@@ -20,7 +20,7 @@ protected[model] trait TemplateComponent { self: Profile =>
     def byIssue(owner: String, repository: String, issueId: Int) =
       byRepository(owner, repository) && (this.issueId === issueId.bind)
 
-    def byIssue(userName: Column[String], repositoryName: Column[String], issueId: Column[Int]) =
+    def byIssue(userName: Rep[String], repositoryName: Rep[String], issueId: Rep[Int]) =
       byRepository(userName, repositoryName) && (this.issueId === issueId)
   }
 
@@ -30,7 +30,7 @@ protected[model] trait TemplateComponent { self: Profile =>
     def byLabel(owner: String, repository: String, labelId: Int) =
       byRepository(owner, repository) && (this.labelId === labelId.bind)
 
-    def byLabel(userName: Column[String], repositoryName: Column[String], labelId: Column[Int]) =
+    def byLabel(userName: Rep[String], repositoryName: Rep[String], labelId: Rep[Int]) =
       byRepository(userName, repositoryName) && (this.labelId === labelId)
   }
 
@@ -40,7 +40,7 @@ protected[model] trait TemplateComponent { self: Profile =>
     def byMilestone(owner: String, repository: String, milestoneId: Int) =
       byRepository(owner, repository) && (this.milestoneId === milestoneId.bind)
 
-    def byMilestone(userName: Column[String], repositoryName: Column[String], milestoneId: Column[Int]) =
+    def byMilestone(userName: Rep[String], repositoryName: Rep[String], milestoneId: Rep[Int]) =
       byRepository(userName, repositoryName) && (this.milestoneId === milestoneId)
   }
 
@@ -50,7 +50,7 @@ protected[model] trait TemplateComponent { self: Profile =>
     def byCommit(owner: String, repository: String, commitId: String) =
       byRepository(owner, repository) && (this.commitId === commitId)
 
-    def byCommit(owner: Column[String], repository: Column[String], commitId: Column[String]) =
+    def byCommit(owner: Rep[String], repository: Rep[String], commitId: Rep[String]) =
       byRepository(userName, repositoryName) && (this.commitId === commitId)
   }
 

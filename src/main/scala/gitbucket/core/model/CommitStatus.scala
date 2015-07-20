@@ -1,15 +1,13 @@
 package gitbucket.core.model
 
-import scala.slick.lifted.MappedTo
-import scala.slick.jdbc._
-
 trait CommitStatusComponent extends TemplateComponent { self: Profile =>
-  import profile.simple._
+  import profile.api._
   import self._
 
   implicit val commitStateColumnType = MappedColumnType.base[CommitState, String](b => b.name , i => CommitState(i))
 
   lazy val CommitStatuses = TableQuery[CommitStatuses]
+
   class CommitStatuses(tag: Tag) extends Table[CommitStatus](tag, "COMMIT_STATUS") with CommitTemplate {
     val commitStatusId = column[Int]("COMMIT_STATUS_ID", O AutoInc)
     val context = column[String]("CONTEXT")
@@ -44,15 +42,12 @@ sealed abstract class CommitState(val name: String)
 
 
 object CommitState {
-  object ERROR extends CommitState("error")
+  case object ERROR extends CommitState("error")
+  case object FAILURE extends CommitState("failure")
+  case object PENDING extends CommitState("pending")
+  case object SUCCESS extends CommitState("success")
 
-  object FAILURE extends CommitState("failure")
-
-  object PENDING extends CommitState("pending")
-
-  object SUCCESS extends CommitState("success")
-
-  val values: Vector[CommitState] = Vector(PENDING, SUCCESS, ERROR, FAILURE)
+  val values: Seq[CommitState] = Seq(PENDING, SUCCESS, ERROR, FAILURE)
 
   private val map: Map[String, CommitState] = values.map(enum => enum.name -> enum).toMap
 
@@ -76,8 +71,4 @@ object CommitState {
       SUCCESS
     }
   }
-
-  implicit val getResult: GetResult[CommitState] = GetResult(r => CommitState(r.<<))
-  implicit val getResultOpt: GetResult[Option[CommitState]] = GetResult(r => r.<<?[String].map(CommitState(_)))
 }
-

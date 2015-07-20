@@ -1,8 +1,7 @@
 package gitbucket.core.model
 
 trait PluginComponent extends TemplateComponent { self: Profile =>
-  import profile.simple._
-  import self._
+  import profile.api._
 
   lazy val Plugins = TableQuery[Plugins]
 
