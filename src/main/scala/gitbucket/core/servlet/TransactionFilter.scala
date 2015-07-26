@@ -2,7 +2,6 @@ package gitbucket.core.servlet
 
 import javax.servlet._
 import javax.servlet.http.HttpServletRequest
-import gitbucket.core.util.DatabaseConfig
 import org.scalatra.ScalatraBase
 import org.slf4j.LoggerFactory
 import slick.jdbc.JdbcBackend.{Database => SlickDatabase, Session}
@@ -45,9 +44,7 @@ object Database {
 
   private val logger = LoggerFactory.getLogger(Database.getClass)
 
-  private val db: SlickDatabase = {
-    SlickDatabase.forConfig("db")
-  }
+  private lazy val db: SlickDatabase = SlickDatabase.forConfig("db")
 
   def apply(): SlickDatabase = db
 

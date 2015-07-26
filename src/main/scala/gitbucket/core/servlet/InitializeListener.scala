@@ -63,8 +63,6 @@ class InitializeListener extends ServletContextListener with SystemSettingsServi
   override def contextDestroyed(event: ServletContextEvent): Unit = {
     // Shutdown plugins
     PluginRegistry.shutdown(event.getServletContext, loadSystemSettings())
-    // Close datasource
-    Database.closeDataSource()
   }
 
 }
