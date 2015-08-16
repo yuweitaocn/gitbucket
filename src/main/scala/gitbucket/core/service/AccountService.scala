@@ -4,17 +4,15 @@ import gitbucket.core.model.{GroupMember, Account}
 import gitbucket.core.model.Profile._
 import gitbucket.core.util.{StringUtil, LDAPUtil}
 import gitbucket.core.service.SystemSettingsService.SystemSettings
-import profile.simple._
+import profile.api._
 import StringUtil._
 import org.slf4j.LoggerFactory
-// TODO Why is direct import required?
-import gitbucket.core.model.Profile.dateColumnType
 
 trait AccountService {
 
   private val logger = LoggerFactory.getLogger(classOf[AccountService])
 
-  def authenticate(settings: SystemSettings, userName: String, password: String)(implicit s: Session): Option[Account] =
+  def authenticate(settings: SystemSettings, userName: String, password: String): DBIO[Option[Account]] =
     if(settings.ldapAuthentication){
       ldapAuthentication(settings, userName, password)
     } else {
@@ -24,45 +22,44 @@ trait AccountService {
   /**
    * Authenticate by internal database.
    */
-  private def defaultAuthentication(userName: String, password: String)(implicit s: Session) = {
-    getAccountByUserName(userName).collect {
-      case account if(!account.isGroupAccount && account.password == sha1(password)) => Some(account)
-    } getOrElse None
+  private def defaultAuthentication(userName: String, password: String) = {
+    getAccountByUserName(userName).map { _ filter {
+      x => !x.isGroupAccount && x.password == sha1(password)
+    }}
   }
 
   /**
    * Authenticate by LDAP.
    */
-  private def ldapAuthentication(settings: SystemSettings, userName: String, password: String)
-                                (implicit s: Session): Option[Account] = {
+  private def ldapAuthentication(settings: SystemSettings, userName: String, password: String) = {
     LDAPUtil.authenticate(settings.ldap.get, userName, password) match {
       case Right(ldapUserInfo) => {
         // Create or update account by LDAP information
-        getAccountByUserName(ldapUserInfo.userName, true) match {
+        getAccountByUserName(ldapUserInfo.userName, true).flatMap {
           case Some(x) if(!x.isRemoved) => {
-            if(settings.ldap.get.mailAttribute.getOrElse("").isEmpty) {
+            (if(settings.ldap.get.mailAttribute.getOrElse("").isEmpty)
               updateAccount(x.copy(fullName = ldapUserInfo.fullName))
-            } else {
+             else
               updateAccount(x.copy(mailAddress = ldapUserInfo.mailAddress, fullName = ldapUserInfo.fullName))
-            }
-            getAccountByUserName(ldapUserInfo.userName)
+            ) >>
+              getAccountByUserName(ldapUserInfo.userName)
           }
           case Some(x) if(x.isRemoved)  => {
             logger.info("LDAP Authentication Failed: Account is already registered but disabled.")
             defaultAuthentication(userName, password)
           }
-          case None => getAccountByMailAddress(ldapUserInfo.mailAddress, true) match {
+          case None => getAccountByMailAddress(ldapUserInfo.mailAddress, true).flatMap {
             case Some(x) if(!x.isRemoved) => {
-              updateAccount(x.copy(fullName = ldapUserInfo.fullName))
-              getAccountByUserName(ldapUserInfo.userName)
+              updateAccount(x.copy(fullName = ldapUserInfo.fullName)) >>
+                getAccountByUserName(ldapUserInfo.userName)
             }
             case Some(x) if(x.isRemoved)  => {
               logger.info("LDAP Authentication Failed: Account is already registered but disabled.")
               defaultAuthentication(userName, password)
             }
             case None => {
-              createAccount(ldapUserInfo.userName, "", ldapUserInfo.fullName, ldapUserInfo.mailAddress, false, None)
-              getAccountByUserName(ldapUserInfo.userName)
+              createAccount(ldapUserInfo.userName, "", ldapUserInfo.fullName, ldapUserInfo.mailAddress, false, None) >>
+                getAccountByUserName(ldapUserInfo.userName)
             }
           }
         }
@@ -74,32 +71,36 @@ trait AccountService {
     }
   }
 
-  def getAccountByUserName(userName: String, includeRemoved: Boolean = false)(implicit s: Session): Option[Account] =
-    Accounts filter(t => (t.userName === userName.bind) && (t.removed === false.bind, !includeRemoved)) firstOption
+  def getAccountByUserName(userName: String, includeRemoved: Boolean = false): DBIO[Option[Account]] =
+    Accounts filter(t => (t.userName === userName.bind) && (t.removed === false.bind, !includeRemoved)) result headOption
 
-  def getAccountsByUserNames(userNames: Set[String], knowns:Set[Account], includeRemoved: Boolean = false)(implicit s: Session): Map[String, Account] = {
+  def getAccountsByUserNames(userNames: Set[String], knowns:Set[Account], includeRemoved: Boolean = false): DBIO[Map[String, Account]] = {
     val map = knowns.map(a => a.userName -> a).toMap
     val needs = userNames -- map.keySet
     if(needs.isEmpty){
-      map
+      DBIO.successful(map)
     }else{
-      map ++ Accounts.filter(t => (t.userName inSetBind needs) && (t.removed === false.bind, !includeRemoved)).list.map(a => a.userName -> a).toMap
+      Accounts
+        .filter(t => (t.userName inSetBind needs) && (t.removed === false.bind, !includeRemoved))
+        .map(t => t.userName -> t)
+        .result
+        .map ( map ++ _ )
     }
   }
 
-  def getAccountByMailAddress(mailAddress: String, includeRemoved: Boolean = false)(implicit s: Session): Option[Account] =
-    Accounts filter(t => (t.mailAddress.toLowerCase === mailAddress.toLowerCase.bind) && (t.removed === false.bind, !includeRemoved)) firstOption
+  def getAccountByMailAddress(mailAddress: String, includeRemoved: Boolean = false): DBIO[Option[Account]] =
+    Accounts filter(t => (t.mailAddress.toLowerCase === mailAddress.toLowerCase.bind) && (t.removed === false.bind, !includeRemoved)) result headOption
 
-  def getAllUsers(includeRemoved: Boolean = true)(implicit s: Session): List[Account] =
+  def getAllUsers(includeRemoved: Boolean = true): DBIO[Seq[Account]] =
     if(includeRemoved){
-      Accounts sortBy(_.userName) list
+      Accounts sortBy(_.userName) result
     } else {
-      Accounts filter (_.removed === false.bind) sortBy(_.userName) list
+      Accounts filter (_.removed === false.bind) sortBy(_.userName) result
     }
 
   def createAccount(userName: String, password: String, fullName: String, mailAddress: String, isAdmin: Boolean, url: Option[String])
-                   (implicit s: Session): Unit =
-    Accounts insert Account(
+                   : DBIO[Int] =
+    Accounts += Account(
       userName       = userName,
       password       = password,
       fullName       = fullName,
@@ -113,7 +114,7 @@ trait AccountService {
       isGroupAccount = false,
       isRemoved      = false)
 
-  def updateAccount(account: Account)(implicit s: Session): Unit =
+  def updateAccount(account: Account): DBIO[Int] =
     Accounts
       .filter { a =>  a.userName === account.userName.bind }
       .map    { a => (a.password, a.fullName, a.mailAddress, a.isAdmin, a.url.?, a.registeredDate, a.updatedDate, a.lastLoginDate.?, a.removed) }
@@ -128,14 +129,14 @@ trait AccountService {
         account.lastLoginDate,
         account.isRemoved)
 
-  def updateAvatarImage(userName: String, image: Option[String])(implicit s: Session): Unit =
+  def updateAvatarImage(userName: String, image: Option[String]): DBIO[Int] =
     Accounts.filter(_.userName === userName.bind).map(_.image.?).update(image)
 
-  def updateLastLoginDate(userName: String)(implicit s: Session): Unit =
+  def updateLastLoginDate(userName: String): DBIO[Int] =
     Accounts.filter(_.userName === userName.bind).map(_.lastLoginDate).update(currentDate)
 
-  def createGroup(groupName: String, url: Option[String])(implicit s: Session): Unit =
-    Accounts insert Account(
+  def createGroup(groupName: String, url: Option[String]): DBIO[Int] =
+    Accounts += Account(
       userName       = groupName,
       password       = "",
       fullName       = groupName,
@@ -149,38 +150,44 @@ trait AccountService {
       isGroupAccount = true,
       isRemoved      = false)
 
-  def updateGroup(groupName: String, url: Option[String], removed: Boolean)(implicit s: Session): Unit =
+  def updateGroup(groupName: String, url: Option[String], removed: Boolean): DBIO[Int] =
     Accounts.filter(_.userName === groupName.bind).map(t => t.url.? -> t.removed).update(url, removed)
 
-  def updateGroupMembers(groupName: String, members: List[(String, Boolean)])(implicit s: Session): Unit = {
-    GroupMembers.filter(_.groupName === groupName.bind).delete
-    members.foreach { case (userName, isManager) =>
-      GroupMembers insert GroupMember (groupName, userName, isManager)
-    }
-  }
+  def updateGroupMembers(groupName: String, members: List[(String, Boolean)]): DBIO[Unit] = DBIO.seq(
+    (
+      GroupMembers.filter(_.groupName === groupName.bind).delete +:
+      members.map { case (userName, isManager) =>
+        GroupMembers += GroupMember (groupName, userName, isManager)
+      }
+    ): _*
+  )
 
-  def getGroupMembers(groupName: String)(implicit s: Session): List[GroupMember] =
+  def getGroupMembers(groupName: String): DBIO[Seq[GroupMember]] =
     GroupMembers
       .filter(_.groupName === groupName.bind)
       .sortBy(_.userName)
-      .list
+      .result
 
-  def getGroupsByUserName(userName: String)(implicit s: Session): List[String] =
+  def getGroupsByUserName(userName: String): DBIO[Seq[String]] =
     GroupMembers
       .filter(_.userName === userName.bind)
       .sortBy(_.groupName)
       .map(_.groupName)
-      .list
+      .result
 
-  def removeUserRelatedData(userName: String)(implicit s: Session): Unit = {
-    GroupMembers.filter(_.userName === userName.bind).delete
-    Collaborators.filter(_.collaboratorName === userName.bind).delete
+  def removeUserRelatedData(userName: String): Unit = DBIO.seq(
+    GroupMembers.filter(_.userName === userName.bind).delete,
+    Collaborators.filter(_.collaboratorName === userName.bind).delete,
     Repositories.filter(_.userName === userName.bind).delete
-  }
+  )
 
-  def getGroupNames(userName: String)(implicit s: Session): List[String] = {
-    List(userName) ++
-      Collaborators.filter(_.collaboratorName === userName.bind).sortBy(_.userName).map(_.userName).list
+  def getGroupNames(userName: String): DBIO[Seq[String]] = {
+    Collaborators
+      .filter(_.collaboratorName === userName.bind)
+      .sortBy(_.userName)
+      .map(_.userName)
+      .result
+      .map ( userName +: _ )
   }
 
 }
