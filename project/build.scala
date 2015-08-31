@@ -57,6 +57,7 @@ object MyBuild extends Build {
       "org.apache.sshd" % "apache-sshd" % "0.11.0",
       "com.typesafe.slick" %% "slick" % "2.1.0",
       "com.novell.ldap" % "jldap" % "2009-10-07",
+      "org.liquibase" % "liquibase-core" % "3.4.1",
       "com.h2database" % "h2" % "1.4.180",
 //      "ch.qos.logback" % "logback-classic" % "1.0.13" % "runtime",
       "org.eclipse.jetty" % "jetty-webapp" % "8.1.16.v20140903" % "container;provided",
