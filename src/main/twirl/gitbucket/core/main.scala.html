@@ -22,7 +22,6 @@
     <script src="@assets/vendors/jquery/jquery-1.11.1.js"></script>
     <script src="@assets/vendors/dropzone/dropzone.js"></script>
     <script src="@assets/common/js/validation.js"></script>
-    <script src="@assets/common/js/gitbucket.js"></script>
     <script src="@assets/vendors/bootstrap/js/bootstrap.js"></script>
     <script src="@assets/vendors/datepicker/js/bootstrap-datepicker.js"></script>
     <script src="@assets/vendors/colorpicker/js/bootstrap-colorpicker.js"></script>
@@ -31,6 +30,8 @@
     <script src="@assets/vendors/elastic/jquery.elastic.source.js"></script>
     <script src="@assets/vendors/facebox/facebox.js"></script>
     <script src="@assets/vendors/jquery-hotkeys/jquery.hotkeys.js"></script>
+    <script src="@assets/vendors/marked/marked.min.js"></script>
+    <script src="@assets/common/js/gitbucket.js"></script>
     @repository.map { repository =>
       @if(!repository.repository.isPrivate){
         <meta name="go-import" content="@context.baseUrl.replaceFirst("^https?://", "")/@repository.owner/@repository.name git @repository.httpUrl" />

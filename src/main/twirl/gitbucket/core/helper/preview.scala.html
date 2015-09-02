@@ -46,6 +46,9 @@ $(function(){
   }
 
   $('#preview@uid').click(function(){
+    markedLinkRenderer.path = '@path';
+    $('#preview-area@uid').html(marked($('#content@uid').val(), { renderer: markedLinkRenderer }));
+  @*
     $('#preview-area@uid').html('<img src="@assets/common/images/indicator.gif"> Previewing...');
     $.post('@url(repository)/_preview', {
       content        : $('#content@uid').val(),
@@ -56,6 +59,7 @@ $(function(){
       $('#preview-area@uid').html(data);
       prettyPrint();
     });
+  *@
   });
 });
 </script>

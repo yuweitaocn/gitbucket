@@ -40,7 +40,63 @@ $(function(){
 
   // syntax highlighting by google-code-prettify
   prettyPrint();
+
+  // Markdown conversion
+  marked.setOptions({
+    renderer: new marked.Renderer(),
+    gfm: true,
+    tables: true,
+    breaks: false,
+    pedantic: false,
+    sanitize: true,
+    smartLists: true,
+    smartypants: false
+  });
+  $('.markdown-content').each(function(i, e){
+    var element = $(e);
+    element.html(marked(element.text()));
+  });
+  //$('#readme-content').html(marked($('#readme-content').text()));
+
 });
+
+var markedLinkRenderer = new marked.Renderer();
+markedLinkRenderer.text = function (text) {
+  var self = markedLinkRenderer
+
+  // convert username/project@SHA to link
+  text = text.replace(/(^|\W)([a-zA-Z0-9\-_]+)\/([a-zA-Z0-9\-_\.]+)@([a-f0-9]{40})(\W|$)/g, function(){
+    return arguments[1] + '<a href="' + self.path + '/' + arguments[2] + '/' + arguments[3] + '/commit/' + arguments[4] + '">' + arguments[2] + '/' + arguments[3] + '@' + arguments[4].substr(0, 7) + '</a>' + arguments[5];
+  });
+  // convert username/project#Num to link
+  text = text.replace(/(^|\\W)([a-zA-Z0-9\\-_]+)\/([a-zA-Z0-9\\-_\\.]+)#([0-9]+)(\\W|$)/g, function(){
+    // TODO whether issue is pull request?
+    return arguments[1] + '<a href="' + self.path + '/' + arguments[2] + '/' + arguments[3] + '/issues/' + arguments[4] + '">' + arguments[2] + '/' + arguments[3] + '#' + arguments[4] + '</a>' + arguments[5];
+  });
+  // convert username@SHA to link
+  text = text.replace(/(^|\W)([a-zA-Z0-9\-_]+)@([a-f0-9]{40})(\W|$)/g, function(){
+    return arguments[1] + '<a href="' + self.path + '/' + arguments[2] + '/' + self.repository + '/commit/' + arguments[3] + '">' + arguments[2] + '@' + arguments[3].substr(0, 7) + '</a>' + arguments[4];
+  });
+  // convert username#Num to link
+  text = text.replace(/(^|\\W)([a-zA-Z0-9\\-_]+)#([0-9]+)(\\W|$)/g, function(){
+    // TODO whether issue is pull request?
+    return arguments[1] + '<a href="' + self.path + '/' + arguments[2] + '/' + self.repository + '/issues/' + arguments[3] + '">' + arguments[2] + '#' + arguments[3] + '</a>' + arguments[4];
+  });
+  // convert issue id to link
+  text = text.replace(/(^|\W)(GH-|#)([0-9]+)(\W|$)/g, function(){
+    // TODO whether issue is pull request?
+    return arguments[1] + '<a href="' + self.path + '/' + self.owner + '/' + self.repository + '/issues/' + arguments[3] + '">' + arguments[2] + arguments[3] + '</a>' + arguments[4];
+  });
+  // convert @username to link
+  text = text.replace(/(^|\W)@([a-zA-Z0-9\-_\.]+)(\W|$)/g, function(){
+    return arguments[1] + '<a href="' + self.path + '/' + arguments[2] + '">@' + arguments[2] + '</a>' + arguments[3];
+  });
+  // convert commit id to link
+  text = text.replace(/(^|[^\w/@])([a-f0-9]{40})(\W|$)/g, function(){
+    return arguments[1] + '<a href="' + self.path + '/' + self.owner + '/' + self.repository + '/commit/' + arguments[2] + '">' + arguments[2].substr(0, 7) + '</a>' + arguments[3];
+  });
+  return text;
+}
 
 function displayErrors(data, elem){
   var i = 0;
