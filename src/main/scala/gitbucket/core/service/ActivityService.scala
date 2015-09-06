@@ -8,11 +8,10 @@ import profile.api._
 trait ActivityService {
 
   def deleteOldActivities(limit: Int): DBIO[Int] = {
-    for {
-      res <- Activities.map(_.activityId).sortBy(_ desc).drop(limit).result.headOption
-    } yield res map {
-      id => Activities.filter(_.activityId <= id.bind).delete
-    } getOrElse DBIO.successful(0)
+    Activities.map(_.activityId).sortBy(_ desc).drop(limit).result.headOption.flatMap {
+      case Some(id) => Activities.filter(_.activityId <= id.bind).delete
+      case None     => DBIO.successful(0)
+    }
   }
 
   def getActivitiesByUser(activityUserName: String, isPublic: Boolean): DBIO[Seq[Activity]] =
