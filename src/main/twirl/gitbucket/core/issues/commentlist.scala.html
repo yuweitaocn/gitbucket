@@ -17,9 +17,7 @@
         }
       </span>
     </div>
-    <div class="box-content-bottom issue-content markdown-body" id="issueContent">
-      @markdown(issue.get.content getOrElse "No description provided.", repository, false, true, true, hasWritePermission)
-    </div>
+    <div class="box-content-bottom issue-content markdown-body markdown-content" id="issueContent">@(issue.get.content getOrElse "No description provided.")</div>
   </div>
 }
 
@@ -58,7 +56,7 @@
                 <strong><a href="@path/@repository.owner/@repository.name/issues/@issueId">Issue #@issueId</a>: @rest.mkString(":")</strong>
               }
             } else {
-                <div class="markdown-body">@markdown(comment.content, repository, false, true, true, hasWritePermission)</div>
+              <div class="markdown-body markdown-content">@comment.content</div>
             }
           }
         </div>
