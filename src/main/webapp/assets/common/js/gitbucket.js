@@ -38,12 +38,12 @@ $(function(){
     $(e.target).hide();
   });
 
-  // syntax highlighting by google-code-prettify
-  prettyPrint();
-
   // Markdown conversion
+  var renderer = new marked.Renderer();
+  renderer.code = markedCodeRenderer;
+
   marked.setOptions({
-    renderer: new marked.Renderer(),
+    renderer: renderer,
     gfm: true,
     tables: true,
     breaks: false,
@@ -55,12 +55,20 @@ $(function(){
   $('.markdown-content').each(function(i, e){
     var element = $(e);
     element.html(marked(element.text()));
+
   });
-  //$('#readme-content').html(marked($('#readme-content').text()));
+
+  // syntax highlighting by google-code-prettify
+  prettyPrint();
 
 });
 
+function markedCodeRenderer(code, lang){
+  return '<pre class="prettyprint ' + lang + '">' + code + '</pre>';
+}
+
 var markedLinkRenderer = new marked.Renderer();
+markedLinkRenderer.code = markedCodeRenderer;
 markedLinkRenderer.text = function (text) {
   var self = markedLinkRenderer
 
