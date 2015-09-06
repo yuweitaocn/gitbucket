@@ -1,52 +1,49 @@
 package gitbucket.core.service
 
 import gitbucket.core.model.Profile._
-import profile.simple._
+import profile.api._
 
 import gitbucket.core.util.StringUtil._
 import gitbucket.core.util.Implicits._
 import gitbucket.core.model._
 
-import scala.slick.jdbc.{StaticQuery => Q}
-import Q.interpolation
-
 
 trait IssuesService {
   import IssuesService._
 
-  def getIssue(owner: String, repository: String, issueId: String)(implicit s: Session) =
+  def getIssue(owner: String, repository: String, issueId: String): DBIO[Option[Issue]] =
     if (issueId forall (_.isDigit))
-      Issues filter (_.byPrimaryKey(owner, repository, issueId.toInt)) firstOption
-    else None
+      Issues filter (_.byPrimaryKey(owner, repository, issueId.toInt)) result headOption
+    else DBIO successful None
 
-  def getComments(owner: String, repository: String, issueId: Int)(implicit s: Session) =
-    IssueComments filter (_.byIssue(owner, repository, issueId)) list
+  def getComments(owner: String, repository: String, issueId: Int): DBIO[Seq[Issue]] =
+    IssueComments filter (_.byIssue(owner, repository, issueId)) result
 
   /** @return IssueComment and commentedUser */
-  def getCommentsForApi(owner: String, repository: String, issueId: Int)(implicit s: Session): List[(IssueComment, Account)] =
+  def getCommentsForApi(owner: String, repository: String, issueId: Int): DBIO[Seq[(IssueComment, Account)]] =
     IssueComments.filter(_.byIssue(owner, repository, issueId))
     .filter(_.action inSetBind Set("comment" , "close_comment", "reopen_comment"))
-    .innerJoin(Accounts).on( (t1, t2) => t1.commentedUserName === t2.userName )
-    .list
+    .join(Accounts).on( (t1, t2) => t1.commentedUserName === t2.userName )
+    .result
 
-  def getComment(owner: String, repository: String, commentId: String)(implicit s: Session) =
+  def getComment(owner: String, repository: String, commentId: String): DBIO[Option[IssueComment]] =
     if (commentId forall (_.isDigit))
       IssueComments filter { t =>
         t.byPrimaryKey(commentId.toInt) && t.byRepository(owner, repository)
-      } firstOption
-    else None
+      } result headOption
+    else DBIO successful None
 
-  def getIssueLabels(owner: String, repository: String, issueId: Int)(implicit s: Session) =
+  def getIssueLabels(owner: String, repository: String, issueId: Int): DBIO[Seq[Label]] =
     IssueLabels
-      .innerJoin(Labels).on { (t1, t2) =>
+      .join(Labels).on { (t1, t2) =>
         t1.byLabel(t2.userName, t2.repositoryName, t2.labelId)
       }
       .filter ( _._1.byIssue(owner, repository, issueId) )
       .map    ( _._2 )
-      .list
+      .result
 
-  def getIssueLabel(owner: String, repository: String, issueId: Int, labelId: Int)(implicit s: Session) =
-    IssueLabels filter (_.byPrimaryKey(owner, repository, issueId, labelId)) firstOption
+  def getIssueLabel(owner: String, repository: String, issueId: Int, labelId: Int): DBIO[Option[IssueLabel]] =
+    IssueLabels filter (_.byPrimaryKey(owner, repository, issueId, labelId)) result headOption
 
   /**
    * Returns the count of the search result against  issues.
@@ -57,25 +54,25 @@ trait IssuesService {
    * @return the count of the search result
    */
   def countIssue(condition: IssueSearchCondition, onlyPullRequest: Boolean,
-                 repos: (String, String)*)(implicit s: Session): Int =
-    Query(searchIssueQuery(repos, condition, onlyPullRequest).length).first
+                 repos: (String, String)*): DBIO[Int] =
+    Query(searchIssueQuery(repos, condition, onlyPullRequest).length).result.head
 
   /**
-   * Returns the Map which contains issue count for each labels.
+   * Returns the pair which contains issue count for each labels.
    *
    * @param owner the repository owner
    * @param repository the repository name
    * @param condition the search condition
-   * @return the Map which contains issue count for each labels (key is label name, value is issue count)
+   * @return the pair which contains issue count for each labels (key is label name, value is issue count)
    */
   def countIssueGroupByLabels(owner: String, repository: String, condition: IssueSearchCondition,
-                              filterUser: Map[String, String])(implicit s: Session): Map[String, Int] = {
+                              filterUser: Map[String, String]): DBIO[Seq[(String, Int)]] = {
 
     searchIssueQuery(Seq(owner -> repository), condition.copy(labels = Set.empty), false)
-      .innerJoin(IssueLabels).on { (t1, t2) =>
+      .join(IssueLabels).on { (t1, t2) =>
         t1.byIssue(t2.userName, t2.repositoryName, t2.issueId)
       }
-      .innerJoin(Labels).on { case ((t1, t2), t3) =>
+      .join(Labels).on { case ((t1, t2), t3) =>
         t2.byLabel(t3.userName, t3.repositoryName, t3.labelId)
       }
       .groupBy { case ((t1, t2), t3) =>
@@ -84,47 +81,72 @@ trait IssuesService {
       .map { case (labelName, t) =>
         labelName -> t.length
       }
-      .toMap
+      .result
   }
 
-  def getCommitStatues(issueList:Seq[(String, String, Int)])(implicit s: Session) :Map[(String, String, Int), CommitStatusInfo] ={
+  // TODO 後で修正する
+  def getCommitStatues(issueList:Seq[(String, String, Int)]):Map[(String, String, Int), CommitStatusInfo] ={
     if(issueList.isEmpty){
       Map.empty
     }else{
-      import scala.slick.jdbc._
-      val issueIdQuery = issueList.map(i => "(PR.USER_NAME=? AND PR.REPOSITORY_NAME=? AND PR.ISSUE_ID=?)").mkString(" OR ")
-      implicit val qset = SetParameter[Seq[(String, String, Int)]] {
-        case (seq, pp) =>
-          for (a <- seq) {
-            pp.setString(a._1)
-            pp.setString(a._2)
-            pp.setInt(a._3)
-          }
-      }
-      import gitbucket.core.model.Profile.commitStateColumnType
-      val query = Q.query[Seq[(String, String, Int)], (String, String, Int, Int, Int, Option[String], Option[CommitState], Option[String], Option[String])](s"""
-        SELECT SUMM.USER_NAME, SUMM.REPOSITORY_NAME, SUMM.ISSUE_ID, CS_ALL, CS_SUCCESS
-             , CSD.CONTEXT, CSD.STATE, CSD.TARGET_URL, CSD.DESCRIPTION
-        FROM (SELECT
-           PR.USER_NAME
-         , PR.REPOSITORY_NAME
-         , PR.ISSUE_ID
-         , COUNT(CS.STATE) AS CS_ALL
-         , SUM(CS.STATE='success') AS CS_SUCCESS
-         , PR.COMMIT_ID_TO AS COMMIT_ID
-          FROM PULL_REQUEST PR
-          JOIN COMMIT_STATUS CS
-            ON PR.USER_NAME=CS.USER_NAME
-           AND PR.REPOSITORY_NAME=CS.REPOSITORY_NAME
-           AND PR.COMMIT_ID_TO=CS.COMMIT_ID
-         WHERE $issueIdQuery
-         GROUP BY PR.USER_NAME, PR.REPOSITORY_NAME, PR.ISSUE_ID) as SUMM
-        LEFT OUTER JOIN COMMIT_STATUS CSD
-          ON SUMM.CS_ALL = 1 AND SUMM.COMMIT_ID = CSD.COMMIT_ID""");
-      query(issueList).list.map{
-        case(userName, repositoryName, issueId, count, successCount, context, state, targetUrl, description) =>
-          (userName, repositoryName, issueId) -> CommitStatusInfo(count, successCount, context, state, targetUrl, description)
-        }.toMap
+//      PullRequests
+//        .join(CommitStatuses).on { (t1, t2) =>
+//          t1.byRepository(t2.userName, t2.repositoryName) && t1.commitIdTo === t2.commitId
+//        }
+//        .filter { case (t1, _) =>
+//          issueList
+//            .map ( x => t1.byIssue(x._1, x._2, x._3) )
+//            .reduce ( _ || _ )
+//        }
+//        .groupBy { case (t1, _) =>
+//          (t1.userName, t1.repositoryName, t1.issueId)
+//        }
+//        .map { case ((userName, repositoryName, issueId), t) =>
+//          (userName,
+//           repositoryName,
+//           issueId,
+//           t.map(_._2.state).length,
+//           t.filter(_._2.state === (CommitState.SUCCESS: CommitState)).map(_._2.state).sum
+//          )
+//        }
+//        .filter { case (_, _, _, stateCount, _) =>
+//          stateCount === 1
+//        }
+
+
+//      val issueIdQuery = issueList.map(i => "(PR.USER_NAME=? AND PR.REPOSITORY_NAME=? AND PR.ISSUE_ID=?)").mkString(" OR ")
+//      implicit val qset = SetParameter[Seq[(String, String, Int)]] {
+//        case (seq, pp) =>
+//          for (a <- seq) {
+//            pp.setString(a._1)
+//            pp.setString(a._2)
+//            pp.setInt(a._3)
+//          }
+//      }
+//      import gitbucket.core.model.Profile.commitStateColumnType
+//      val query = Q.query[Seq[(String, String, Int)], (String, String, Int, Int, Int, Option[String], Option[CommitState], Option[String], Option[String])](s"""
+//        SELECT SUMM.USER_NAME, SUMM.REPOSITORY_NAME, SUMM.ISSUE_ID, CS_ALL, CS_SUCCESS
+//             , CSD.CONTEXT, CSD.STATE, CSD.TARGET_URL, CSD.DESCRIPTION
+//        FROM (SELECT
+//           PR.USER_NAME
+//         , PR.REPOSITORY_NAME
+//         , PR.ISSUE_ID
+//         , COUNT(CS.STATE) AS CS_ALL
+//         , SUM(CS.STATE='success') AS CS_SUCCESS
+//         , PR.COMMIT_ID_TO AS COMMIT_ID
+//          FROM PULL_REQUEST PR
+//          JOIN COMMIT_STATUS CS
+//            ON PR.USER_NAME=CS.USER_NAME
+//           AND PR.REPOSITORY_NAME=CS.REPOSITORY_NAME
+//           AND PR.COMMIT_ID_TO=CS.COMMIT_ID
+//         WHERE $issueIdQuery
+//         GROUP BY PR.USER_NAME, PR.REPOSITORY_NAME, PR.ISSUE_ID) as SUMM
+//        LEFT OUTER JOIN COMMIT_STATUS CSD
+//          ON SUMM.CS_ALL = 1 AND SUMM.COMMIT_ID = CSD.COMMIT_ID""");
+//      query(issueList).list.map{
+//        case(userName, repositoryName, issueId, count, successCount, context, state, targetUrl, description) =>
+//          (userName, repositoryName, issueId) -> CommitStatusInfo(count, successCount, context, state, targetUrl, description)
+//        }.toMap
     }
   }
 
@@ -138,22 +160,25 @@ trait IssuesService {
    * @param repos Tuple of the repository owner and the repository name
    * @return the search result (list of tuples which contain issue, labels and comment count)
    */
+  // TODO 後で修正する
   def searchIssue(condition: IssueSearchCondition, pullRequest: Boolean, offset: Int, limit: Int, repos: (String, String)*)
-                 (implicit s: Session): List[IssueInfo] = {
+                 : DBIO[Seq[IssueInfo]] = {
     // get issues and comment count and labels
     val result = searchIssueQueryBase(condition, pullRequest, offset, limit, repos)
-        .leftJoin (IssueLabels) .on { case ((t1, t2), t3) => t1.byIssue(t3.userName, t3.repositoryName, t3.issueId) }
-        .leftJoin (Labels)      .on { case (((t1, t2), t3), t4) => t3.byLabel(t4.userName, t4.repositoryName, t4.labelId) }
-        .leftJoin (Milestones)  .on { case ((((t1, t2), t3), t4), t5) => t1.byMilestone(t5.userName, t5.repositoryName, t5.milestoneId) }
+        .joinLeft (IssueLabels) .on { case ((t1, t2), t3) => t1.byIssue(t3.userName, t3.repositoryName, t3.issueId) }
+        .joinLeft (Labels)      .on { case (((t1, t2), t3), t4) => t3.byLabel(t4.userName, t4.repositoryName, t4.labelId) }
+        .joinLeft (Milestones)  .on { case ((((t1, t2), t3), t4), t5) => t1.byMilestone(t5.userName, t5.repositoryName, t5.milestoneId) }
         .map { case ((((t1, t2), t3), t4), t5) =>
           (t1, t2.commentCount, t4.labelId.?, t4.labelName.?, t4.color.?, t5.title.?)
         }
-        .list
-        .splitWith { (c1, c2) =>
-          c1._1.userName       == c2._1.userName &&
-          c1._1.repositoryName == c2._1.repositoryName &&
-          c1._1.issueId        == c2._1.issueId
+        .result
+        .map { _.splitWith { (c1, c2) =>
+            c1._1.userName       == c2._1.userName &&
+            c1._1.repositoryName == c2._1.repositoryName &&
+            c1._1.issueId        == c2._1.issueId
+          }
         }
+
     val status = getCommitStatues(result.map(_.head._1).map(is => (is.userName, is.repositoryName, is.issueId)))
 
     result.map { issues => issues.head match {
@@ -172,23 +197,22 @@ trait IssuesService {
    * @return (issue, issueUser, commentCount, pullRequest, headRepo, headOwner)
    */
   def searchPullRequestByApi(condition: IssueSearchCondition, offset: Int, limit: Int, repos: (String, String)*)
-                 (implicit s: Session): List[(Issue, Account, Int, PullRequest, Repository, Account)] = {
+                 : DBIO[Seq[(Issue, Account, Int, PullRequest, Repository, Account)]] = {
     // get issues and comment count and labels
     searchIssueQueryBase(condition, true, offset, limit, repos)
-      .innerJoin(PullRequests).on { case ((t1, t2), t3) => t3.byPrimaryKey(t1.userName, t1.repositoryName, t1.issueId) }
-      .innerJoin(Repositories).on { case (((t1, t2), t3), t4) => t4.byRepository(t1.userName, t1.repositoryName) }
-      .innerJoin(Accounts).on { case ((((t1, t2), t3), t4), t5) => t5.userName === t1.openedUserName }
-      .innerJoin(Accounts).on { case (((((t1, t2), t3), t4), t5), t6) => t6.userName === t4.userName }
+      .join(PullRequests).on { case ((t1, t2), t3) => t3.byPrimaryKey(t1.userName, t1.repositoryName, t1.issueId) }
+      .join(Repositories).on { case (((t1, t2), t3), t4) => t4.byRepository(t1.userName, t1.repositoryName) }
+      .join(Accounts).on { case ((((t1, t2), t3), t4), t5) => t5.userName === t1.openedUserName }
+      .join(Accounts).on { case (((((t1, t2), t3), t4), t5), t6) => t6.userName === t4.userName }
       .map { case (((((t1, t2), t3), t4), t5), t6) =>
           (t1, t5, t2.commentCount, t3, t4, t6)
       }
-      .list
+      .result
   }
 
-  private def searchIssueQueryBase(condition: IssueSearchCondition, pullRequest: Boolean, offset: Int, limit: Int, repos: Seq[(String, String)])
-                 (implicit s: Session) =
+  private def searchIssueQueryBase(condition: IssueSearchCondition, pullRequest: Boolean, offset: Int, limit: Int, repos: Seq[(String, String)]) =
     searchIssueQuery(repos, condition, pullRequest)
-        .innerJoin(IssueOutline).on { (t1, t2) => t1.byIssue(t2.userName, t2.repositoryName, t2.issueId) }
+        .join(IssueOutline).on { (t1, t2) => t1.byIssue(t2.userName, t2.repositoryName, t2.issueId) }
         .sortBy { case (t1, t2) =>
           (condition.sort match {
             case "created"  => t1.registeredDate
@@ -207,11 +231,11 @@ trait IssuesService {
   /**
    * Assembles query for conditional issue searching.
    */
-  private def searchIssueQuery(repos: Seq[(String, String)], condition: IssueSearchCondition, pullRequest: Boolean)(implicit s: Session) =
+  private def searchIssueQuery(repos: Seq[(String, String)], condition: IssueSearchCondition, pullRequest: Boolean) =
     Issues filter { t1 =>
       repos
         .map { case (owner, repository) => t1.byRepository(owner, repository) }
-        .foldLeft[Column[Boolean]](false) ( _ || _ ) &&
+        .foldLeft[Rep[Boolean]](false) ( _ || _ ) &&
       (t1.closed           === (condition.state == "closed").bind) &&
       //(t1.milestoneId      === condition.milestoneId.get.get.bind, condition.milestoneId.flatten.isDefined) &&
       (t1.milestoneId.?    isEmpty, condition.milestone == Some(None)) &&
@@ -248,11 +272,11 @@ trait IssuesService {
 
   def createIssue(owner: String, repository: String, loginUser: String, title: String, content: Option[String],
                   assignedUserName: Option[String], milestoneId: Option[Int],
-                  isPullRequest: Boolean = false)(implicit s: Session) =
+                  isPullRequest: Boolean = false): DBIO[Int] = {
     // next id number
     sql"SELECT ISSUE_ID + 1 FROM ISSUE_ID WHERE USER_NAME = $owner AND REPOSITORY_NAME = $repository FOR UPDATE".as[Int]
-        .firstOption.filter { id =>
-      Issues insert Issue(
+        .head.flatMap { id =>
+      (Issues += Issue(
           owner,
           repository,
           id,
@@ -264,24 +288,25 @@ trait IssuesService {
           false,
           currentDate,
           currentDate,
-          isPullRequest)
-
+          isPullRequest)) >>
       // increment issue id
       IssueId
         .filter (_.byPrimaryKey(owner, repository))
         .map (_.issueId)
-        .update (id) > 0
-    } get
+        .update (id) >>
+      DBIO.successful(id)
+    }
+  }
 
-  def registerIssueLabel(owner: String, repository: String, issueId: Int, labelId: Int)(implicit s: Session) =
-    IssueLabels insert IssueLabel(owner, repository, issueId, labelId)
+  def registerIssueLabel(owner: String, repository: String, issueId: Int, labelId: Int): DBIO[Int] =
+    IssueLabels += IssueLabel(owner, repository, issueId, labelId)
 
-  def deleteIssueLabel(owner: String, repository: String, issueId: Int, labelId: Int)(implicit s: Session) =
+  def deleteIssueLabel(owner: String, repository: String, issueId: Int, labelId: Int): DBIO[Int] =
     IssueLabels filter(_.byPrimaryKey(owner, repository, issueId, labelId)) delete
 
   def createComment(owner: String, repository: String, loginUser: String,
-      issueId: Int, content: String, action: String)(implicit s: Session): Int =
-    IssueComments.autoInc insert IssueComment(
+      issueId: Int, content: String, action: String): DBIO[Int] =
+    IssueComments.autoInc += IssueComment(
         userName          = owner,
         repositoryName    = repository,
         issueId           = issueId,
@@ -292,7 +317,7 @@ trait IssuesService {
         updatedDate       = currentDate)
 
   def updateIssue(owner: String, repository: String, issueId: Int,
-      title: String, content: Option[String])(implicit s: Session) =
+      title: String, content: Option[String]): DBIO[Int] =
     Issues
       .filter (_.byPrimaryKey(owner, repository, issueId))
       .map { t =>
@@ -301,14 +326,14 @@ trait IssuesService {
       .update (title, content, currentDate)
 
   def updateAssignedUserName(owner: String, repository: String, issueId: Int,
-                             assignedUserName: Option[String])(implicit s: Session) =
+                             assignedUserName: Option[String]): DBIO[Int] =
     Issues.filter (_.byPrimaryKey(owner, repository, issueId)).map(_.assignedUserName?).update (assignedUserName)
 
   def updateMilestoneId(owner: String, repository: String, issueId: Int,
-                        milestoneId: Option[Int])(implicit s: Session) =
+                        milestoneId: Option[Int]): DBIO[Int] =
     Issues.filter (_.byPrimaryKey(owner, repository, issueId)).map(_.milestoneId?).update (milestoneId)
 
-  def updateComment(commentId: Int, content: String)(implicit s: Session) =
+  def updateComment(commentId: Int, content: String): DBIO[Int] =
     IssueComments
       .filter (_.byPrimaryKey(commentId))
       .map { t =>
@@ -316,10 +341,10 @@ trait IssuesService {
       }
       .update (content, currentDate)
 
-  def deleteComment(commentId: Int)(implicit s: Session) =
+  def deleteComment(commentId: Int): DBIO[Int] =
     IssueComments filter (_.byPrimaryKey(commentId)) delete
 
-  def updateClosed(owner: String, repository: String, issueId: Int, closed: Boolean)(implicit s: Session) =
+  def updateClosed(owner: String, repository: String, issueId: Int, closed: Boolean): DBIO[Int] =
     Issues
       .filter (_.byPrimaryKey(owner, repository, issueId))
       .map { t =>
@@ -336,14 +361,14 @@ trait IssuesService {
    * @return issues with comment count and matched content of issue or comment
    */
   def searchIssuesByKeyword(owner: String, repository: String, query: String)
-                           (implicit s: Session): List[(Issue, Int, String)] = {
-    import slick.driver.JdbcDriver.likeEncode
+                           : DBIO[Seq[(Issue, Int, String)]] = {
+    import profile.likeEncode
     val keywords = splitWords(query.toLowerCase)
 
     // Search Issue
     val issues = Issues
       .filter(_.byRepository(owner, repository))
-      .innerJoin(IssueOutline).on { case (t1, t2) =>
+      .join(IssueOutline).on { case (t1, t2) =>
         t1.byIssue(t2.userName, t2.repositoryName, t2.issueId)
       }
       .filter { case (t1, t2) =>
@@ -359,10 +384,10 @@ trait IssuesService {
     // Search IssueComment
     val comments = IssueComments
       .filter(_.byRepository(owner, repository))
-      .innerJoin(Issues).on { case (t1, t2) =>
+      .join(Issues).on { case (t1, t2) =>
         t1.byIssue(t2.userName, t2.repositoryName, t2.issueId)
       }
-      .innerJoin(IssueOutline).on { case ((t1, t2), t3) =>
+      .join(IssueOutline).on { case ((t1, t2), t3) =>
         t2.byIssue(t3.userName, t3.repositoryName, t3.issueId)
       }
       .filter { case ((t1, t2), t3) =>
@@ -376,21 +401,23 @@ trait IssuesService {
 
     issues.union(comments).sortBy { case (issue, commentId, _, _) =>
       issue.issueId -> commentId
-    }.list.splitWith { case ((issue1, _, _, _), (issue2, _, _, _)) =>
-      issue1.issueId == issue2.issueId
-    }.map { _.head match {
-        case (issue, _, content, commentCount) => (issue, commentCount, content.getOrElse(""))
-      }
-    }.toList
+    }.result.map {
+      _.splitWith { case ((issue1, _, _, _), (issue2, _, _, _)) =>
+        issue1.issueId == issue2.issueId
+      }.map { _.head match {
+          case (issue, _, content, commentCount) => (issue, commentCount, content.getOrElse(""))
+        }
+      }.toList
+    }
   }
 
-  def closeIssuesFromMessage(message: String, userName: String, owner: String, repository: String)(implicit s: Session) = {
-    extractCloseId(message).foreach { issueId =>
-      for(issue <- getIssue(owner, repository, issueId) if !issue.closed){
-        createComment(owner, repository, userName, issue.issueId, "Close", "close")
-        updateClosed(owner, repository, issue.issueId, true)
-      }
-    }
+  def closeIssuesFromMessage(message: String, userName: String, owner: String, repository: String): DBIO[Unit] = {
+    DBIO.seq(extractCloseId(message).map { issueId =>
+      getIssue(owner, repository, issueId)
+        .filter(_.exists(!_.closed)) >>
+        createComment(owner, repository, userName, issueId.toInt, "Close", "close") >>
+        updateClosed(owner, repository, issueId.toInt, true)
+    }.toSeq: _*)
   }
 }
 
