@@ -41,7 +41,7 @@ object StringUtil {
       detector.handleData(content, 0, content.length)
       detector.dataEnd()
       if(detector.getDetectedCharset.equals("HZ-GB-2312")){
-        "UTF-8"
+        "GBK"
       }
       detector.getDetectedCharset match {
         case null => "UTF-8"
