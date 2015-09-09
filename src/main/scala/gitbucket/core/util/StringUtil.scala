@@ -40,6 +40,9 @@ object StringUtil {
     defining(new UniversalDetector(null)){ detector =>
       detector.handleData(content, 0, content.length)
       detector.dataEnd()
+      if(detector.getDetectedCharset.equals("HZ-GB-2312")){
+        "UTF-8"
+      }
       detector.getDetectedCharset match {
         case null => "UTF-8"
         case e    => e
